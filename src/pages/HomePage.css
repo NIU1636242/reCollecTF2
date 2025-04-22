@@ -1,0 +1,16 @@
+div {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 100vh; /* Full viewport height */
+    text-align: center;
+  }
+
+h1 {
+  font-size: 3rem; /* Make the heading bigger */
+  margin-bottom: 1rem;
+}
+
+p {
+  font-size: 1.5rem; /* Make the paragraph text bigger */
+}

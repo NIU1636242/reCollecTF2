@@ -1,14 +1,28 @@
-import { useState } from 'react'
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import ReactDOM from "react-dom/client";
+import Layout from "./pages/Layout";
+import HomePage from "./pages/HomePage";
+import SearchPage from "./pages/SearchPage";
+import SearchTF from "./pages/SearchTF";
+import SearchSpecies from "./pages/SearchSpecies";
+import SearchExpTechniques from "./pages/SearchExpTechniques";
 
 function App() {
-  const [count, setCount] = useState(0)
 
   return (
-    <>
-      <h1>CollecTF</h1>
-      <h2>In development...</h2>
-    </>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/CollecTF" element={<Layout/>}>
+          <Route index element={<HomePage />} />
+          <Route path="Search" element={<SearchPage />} >
+            <Route path="1" element={<SearchTF />} />
+            <Route path="2" element={<SearchSpecies />} />
+            <Route path="3" element={<SearchExpTechniques />} />
+          </Route>
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
 
-export default App
+export default App;
