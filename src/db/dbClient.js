@@ -10,7 +10,7 @@ export const dbWorkerPromise = createDbWorker(
       config: {
         serverMode: "full",
         url:         "/CollecTF/CollecTF.db",
-        requestChunkSize: 64 * 1024,  // fewer, larger requests
+        requestChunkSize: 4096,  // fewer, larger requests
       },
     },
   ],

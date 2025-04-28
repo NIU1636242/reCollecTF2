@@ -12,7 +12,7 @@ function SearchTF() {
         <>
             <SearchBar step={step} selectedData={selectedData} setSelectedData={setSelectedData} setStep={setStep}/>
             <BackButton step={step} setStep={setStep}/>
-            <NextButton searchStep={step}/>
+            <NextButton searchStep={step} setStep={setStep}/>
         </>
     );
 }
