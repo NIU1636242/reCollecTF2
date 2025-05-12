@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      queries:
+        description: 'Write SQL queries'
+        required: false
+        default: 'false'
 
 jobs:
   build:
@@ -13,6 +19,24 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+      
+      - name: Install SQLite
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.queries == 'true'
+        run: sudo apt-get install sqlite3 
+
+      - name: Create SQL queries file ans activate FK
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.queries == 'true'
+        run: echo "PRAGMA foreign_keys = ON;" > queries.sql && echo "${{ github.event.inputs.queries }}" >> queries.sql
+
+      - name: Run SQL queries
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.queries == 'true'
+        run: |
+          set -e
+          sqlite3 ./public/CollecTF.db < queries.sql
+
+      - name: Delete SQL queries file
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.queries == 'true'
+        run: rm queries.sql
 
       - name: Setup Node
         uses: actions/setup-node@v3

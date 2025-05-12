@@ -29,6 +29,10 @@ export async function getTFWithFamilies() {
     return runQuery(query)
 }
 
+export async function getAllTfFamilies() {
+    return runQuery("SELECT TF_family_id, name FROM core_tffamily")
+}
+
 //Usage:
 
 /*

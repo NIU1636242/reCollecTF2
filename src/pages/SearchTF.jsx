@@ -2,7 +2,7 @@ import "./SearchTF.css"
 import BackButton from "../components/BackButton";
 import NextButton from "../components/NextButton";
 import SearchBar from "../components/SearchBar";
-import { useSearch } from "../components/SearchContext";
+import { useSearch } from "../components/contexts/SearchContext";
 
 function SearchTF() {
 

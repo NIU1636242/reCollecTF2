@@ -1,38 +1,33 @@
 import { useNavigate } from "react-router-dom";
-import {useState} from "react";
 import SearchButton from "./SearchButton";
 import LoginButton from "./LoginButton";
-import LoginModal from "./LoginModal";
+import WriteButton from "./WriteButton";
 import "./Header.css";
+import { useUser } from "./contexts/UserContext";
+
 
 const Header = () => {
     const navigate = useNavigate();
+    // const { user, userStatus, loading } = useSession();
 
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+    const { user, userStatus, loading } = useUser();
     
     const handleLogoClick = () => {
         navigate("/CollecTF/");
     };
-    
+
     return (
         <header className="header">
 
-        <h1 className="logo" onClick={handleLogoClick}>
+        <h1 className="text-blue-400" onClick={handleLogoClick}>
             CollecTF
         </h1>
 
+        {(userStatus == 2) && <WriteButton />}
+
         <SearchButton />
 
-        <LoginButton onClick={() => setIsLoginModalOpen(true)} isLoggedIn={isLoggedIn}/>
-
-        {isLoginModalOpen && (
-            <LoginModal
-                isOpen={isLoginModalOpen}
-                onClose={() => setIsLoginModalOpen(false)}
-                setIsLoggedIn={setIsLoggedIn}
-            />
-        )}
+        <LoginButton userStatus={userStatus} user={user} loading={loading}/>
 
         </header>
     );

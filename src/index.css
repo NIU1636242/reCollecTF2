@@ -1,4 +1,5 @@
 /* index.css */
+@import "tailwindcss";
 
 :root {
   --bg-color: #1e1e1e;
@@ -42,6 +43,11 @@ button {
   border-radius: var(--radius);
   cursor: pointer;
   transition: background-color 0.2s;
+}
+
+button:disabled {
+  background-color: var(--muted-text);
+  cursor: not-allowed;
 }
 
 button:hover {

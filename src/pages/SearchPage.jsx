@@ -1,6 +1,6 @@
 import { Outlet, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { SearchContext } from "../components/SearchContext";
+import { SearchContext } from "../components/contexts/SearchContext";
 import "./SearchPage.css"
 
 function SearchPage() {

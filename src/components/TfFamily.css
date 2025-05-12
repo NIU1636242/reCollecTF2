@@ -1,7 +1,7 @@
 ul {
-    list-style: none; /* 🔴 Quita los puntos del <li> */
-    padding-left: 1rem; /* Opcional: sangría para elementos anidados */
-    margin: 0;
+    list-style: none; /* Remove dots from <li> */
+    padding-left: 4rem;
+    margin-left: 8rem;
 }
 
 li {
@@ -11,5 +11,5 @@ li {
 label {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem; /* Espacio entre checkbox y texto */
+    gap: 0.5rem; /* Space between checkbox and text */
 }

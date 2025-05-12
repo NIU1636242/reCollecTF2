@@ -7,7 +7,7 @@
 }
 
 .main-content {
-    max-width: 800px;
+    max-width: 25000px;
     margin: 0 auto;
     padding: var(--padding);
 }
