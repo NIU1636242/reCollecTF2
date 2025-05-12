@@ -20,4 +20,9 @@ export default defineConfig({
     }
   ],
   base: "/CollecTF/",
+  build: {
+    rollupOptions: {
+      external: ['fsevents']
+    }
+  }
 })
