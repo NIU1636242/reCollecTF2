@@ -11,7 +11,7 @@ const REPO_NAME = 'CollecTF';
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     //1 - Allow CORS
-    const origin = "https://milegoo.github.io/CollecTF/" //change in dev
+    const origin = "https://milegoo.github.io" //change in dev
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");

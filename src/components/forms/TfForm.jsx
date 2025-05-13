@@ -58,7 +58,7 @@ export default function FormA() {
 
   const handleConfirmSend = async () => {
       try {
-        const res = await dispatchWorkflow('/api/submit-form-a', queries);
+        const res = await dispatchWorkflow(queries);
         if (res.ok) {
           setQueries([]); // Clear queries after sending
           setNumOfQueries(0); // Reset the number of queries

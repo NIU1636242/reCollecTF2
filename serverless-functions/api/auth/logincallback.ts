@@ -47,10 +47,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Set-Cookie', serialize('session_token', jwtToken, {
         httpOnly: true,
         secure: true,
-        sameSite: "lax",
+        sameSite: "none",
         path: '/',
         maxAge: 60 * 60 * 24, // 1 day
     }));
+
+    console.log("JWT token set in cookie", jwtToken);
+    console.log("Headers", res.getHeaders());
+    
 
     const frontendUrl = process.env.FRONTEND_URL;
     res.redirect(`${frontendUrl}`);
