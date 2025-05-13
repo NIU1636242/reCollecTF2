@@ -1,7 +1,10 @@
 import { createDbWorker } from "sql.js-httpvfs";
 
+//console.log("Before error");
+
 const workerUrl = new URL("sql.js-httpvfs/dist/sqlite.worker.js", import.meta.url).toString();
 const wasmUrl   = new URL("sql.js-httpvfs/dist/sql-wasm.wasm",   import.meta.url).toString();
+
 
 export const dbWorkerPromise = createDbWorker(
   [
@@ -9,7 +12,7 @@ export const dbWorkerPromise = createDbWorker(
       from: "inline",
       config: {
         serverMode: "full",
-        url:         "/CollecTF/CollecTF.db",
+        url: "/CollecTF/CollecTF.db",
         requestChunkSize: 4096,  // fewer, larger requests
       },
     },
@@ -18,9 +21,6 @@ export const dbWorkerPromise = createDbWorker(
   wasmUrl,
   10 * 1024 * 1024
 );
-
-
-
 
 /*
 

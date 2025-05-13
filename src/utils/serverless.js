@@ -1,4 +1,3 @@
-import { EnvironmentModuleGraph } from "vite";
 
 const dispatchUrl = "https://collectf.vercel.app/api/auth/functions/send-form.ts"//DEV: "http://localhost:3000/api/auth/functions/send-form.ts";
 
