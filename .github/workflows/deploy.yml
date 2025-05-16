@@ -19,11 +19,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-
-      - name: Print Event
-        run: |
-          echo "Event name Workflow: ${{github.event_name}}"
-          echo "Inputs queries: ${{github.event.inputs.queries}}"
       
       - name: Install SQLite
         if: ${{github.event_name == 'workflow_dispatch' && github.event.inputs.queries != 'false'}}
