@@ -65,7 +65,7 @@ export default function FormA() {
         console.log("Sending queries to the database...");
         console.log(queries);
         
-        const res = await dispatchWorkflow({inputs: queries});
+        const res = await dispatchWorkflow({inputs: {queries: JSON.stringify(queries)}});
         if (res.ok) {
           console.log("Queries sent successfully.");
           
