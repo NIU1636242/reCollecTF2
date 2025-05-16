@@ -59,6 +59,7 @@ export default function FormA() {
   const handleConfirmSend = async () => {
       try {
         console.log("Sending queries to the database...");
+        console.log(queries);
         
         const res = await dispatchWorkflow(queries);
         if (res.ok) {
