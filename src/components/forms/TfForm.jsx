@@ -10,7 +10,7 @@ export default function FormA() {
 
   const [familyOptions, setFamilyOptions] = useState(['Loading...']);
   const [status, setStatus] = useState('');
-  const [queries, setQueries] = useState([]);
+  const [queries, setQueries] = useState({});
   const [numOfQueries, setNumOfQueries] = useState(0);
   const [showModal, setShowModal] = useState(false);
 
@@ -38,14 +38,18 @@ export default function FormA() {
     if (action === 'save' && family !== 0) {
       const newQuery = `INSERT INTO core_tf (name, family, description) VALUES (${name}, ${family}, ${description})`;
       setQueries((prev) => {
-        if (prev.includes(newQuery)) {
+
+        if (Object.values(prev).includes(newQuery)) {
           setStatus('This query already exists.');
           return prev;
         }
-        else {
-          setNumOfQueries((prev) => prev + 1);
-          return [...prev, newQuery]
-        }
+
+        const nextIndex = Object.keys(prev).length + 1;
+        const newKey = `query${nextIndex}`;
+
+        setNumOfQueries((prev) => prev + 1);
+        return {...prev, [newKey]: newQuery}
+        
     });
       setNumOfQueries((prev) => prev + 1);
     }
@@ -61,11 +65,11 @@ export default function FormA() {
         console.log("Sending queries to the database...");
         console.log(queries);
         
-        const res = await dispatchWorkflow({queries});
+        const res = await dispatchWorkflow({inputs: queries});
         if (res.ok) {
           console.log("Queries sent successfully.");
           
-          setQueries([]); // Clear queries after sending
+          setQueries({}); // Clear queries after sending
           setNumOfQueries(0); // Reset the number of queries
           setStatus('Your data has been sent to the database.');
         }
@@ -83,7 +87,7 @@ export default function FormA() {
     setName('');
     setFamily('');
     setDescription('');
-    setQueries([]);
+    setQueries({});
     setNumOfQueries(0);
     setStatus('');
   }
@@ -127,8 +131,8 @@ export default function FormA() {
       <button disabled={numOfQueries >= 10} type="submit" name="action" value="save" className="bg-blue-500 text-white px-4 py-2">Save</button>
       <button disabled={numOfQueries === 0} type="submit" name="action" value="send" className="bg-blue-500 text-white px-4 py-2">Send to DATABASE</button>
       {numOfQueries > 0 && !showModal && (
-        queries.map((query, index) => (
-          <p key={index} className="text-gray-500">
+        Object.entries(queries).map(([key, query]) => (
+          <p key={key} className="text-gray-500">
             {query}
           </p>
         ))
