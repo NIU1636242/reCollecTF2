@@ -58,8 +58,12 @@ export default function FormA() {
 
   const handleConfirmSend = async () => {
       try {
+        console.log("Sending queries to the database...");
+        
         const res = await dispatchWorkflow(queries);
         if (res.ok) {
+          console.log("Queries sent successfully.");
+          
           setQueries([]); // Clear queries after sending
           setNumOfQueries(0); // Reset the number of queries
           setStatus('Your data has been sent to the database.');
