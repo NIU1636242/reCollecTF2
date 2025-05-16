@@ -10,7 +10,7 @@ export default function FormA() {
 
   const [familyOptions, setFamilyOptions] = useState(['Loading...']);
   const [status, setStatus] = useState('');
-  const [queries, setQueries] = useState([]);
+  const [queries, setQueries] = useState({});
   const [numOfQueries, setNumOfQueries] = useState(0);
   const [showModal, setShowModal] = useState(false);
 
@@ -38,14 +38,18 @@ export default function FormA() {
     if (action === 'save' && family !== 0) {
       const newQuery = `INSERT INTO core_tf (name, family, description) VALUES (${name}, ${family}, ${description})`;
       setQueries((prev) => {
-        if (prev.includes(newQuery)) {
+
+        if (Object.values(prev).includes(newQuery)) {
           setStatus('This query already exists.');
           return prev;
         }
-        else {
-          setNumOfQueries((prev) => prev + 1);
-          return [...prev, newQuery]
-        }
+
+        const nextIndex = Object.keys(prev).length + 1;
+        const newKey = `query${nextIndex}`;
+
+        setNumOfQueries((prev) => prev + 1);
+        return {...prev, [newKey]: newQuery}
+        
     });
       setNumOfQueries((prev) => prev + 1);
     }
@@ -65,7 +69,7 @@ export default function FormA() {
         if (res.ok) {
           console.log("Queries sent successfully.");
           
-          setQueries([]); // Clear queries after sending
+          setQueries({}); // Clear queries after sending
           setNumOfQueries(0); // Reset the number of queries
           setStatus('Your data has been sent to the database.');
         }
