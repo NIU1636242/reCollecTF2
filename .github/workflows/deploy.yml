@@ -28,7 +28,7 @@ jobs:
         if: ${{github.event_name == 'workflow_dispatch' && github.event.inputs.queries != 'false'}}
         run: |
           echo "PRAGMA foreign_keys = ON;" > queries.sql
-          echo "${{ github.event.inputs.queries }}" | jq -r '.[]' >> queries.sql
+          echo '${{ github.event.inputs.queries }}'| jq -r '.[]' >> queries.sql
 
       - name: Run SQL queries
         if: ${{github.event_name == 'workflow_dispatch' && github.event.inputs.queries != 'false'}}
