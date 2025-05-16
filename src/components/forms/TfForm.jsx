@@ -36,7 +36,7 @@ export default function FormA() {
     // Transform inputs to SQL queries
 
     if (action === 'save' && family !== 0) {
-      const newQuery = `INSERT INTO core_tf (name, family_id, description) VALUES ('${name}',' ${family}, '${description}')`;
+      const newQuery = `INSERT INTO core_tf (name, family_id, description) VALUES ('${name}', ${family}, '${description}')`;
       setQueries((prev) => {
 
         if (Object.values(prev).includes(newQuery)) {
