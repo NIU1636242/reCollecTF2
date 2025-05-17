@@ -1,0 +1,54 @@
+name: Update DB
+
+on:
+  workflow_dispatch:
+    inputs:
+      queries:
+        description: 'Write SQL queries'
+        required: false
+        default: 'false'
+
+
+jobs:
+  update:
+    name: Update
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        
+      - name: Install SQLite
+        if: ${{github.event.inputs.queries != 'false'}}
+        run: sudo apt-get install sqlite3 
+
+      - name: Create SQL queries file ans activate FK
+        if: ${{github.event.inputs.queries != 'false'}}
+        run: |
+          echo "PRAGMA foreign_keys = ON;" > queries.sql
+          echo "${{ github.event.inputs.queries }}" | base64 -d > queries.json
+          jq -r '.[]' queries.json >> queries.sql
+          cat queries.sql
+
+      - name: Run SQL queries
+        if: ${{github.event.inputs.queries != 'false'}}
+        run: |
+          set -e
+          sqlite3 ./public/CollecTF.db < queries.sql
+
+      - name: Delete SQL queries file
+        if: ${{github.event.inputs.queries != 'false'}}
+        run: rm queries.sql && rm queries.json
+
+      - name: Commit updated database
+        if: ${{ github.event.inputs.queries != 'false' }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add ./public/CollecTF.db
+          if ! git diff --cached --quiet; then
+            git commit -m "Update database via workflow_dispatch"
+            git push origin main
+          else
+            echo "No changes to commit."
+          fi
