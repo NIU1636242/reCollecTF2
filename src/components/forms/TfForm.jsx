@@ -62,14 +62,10 @@ export default function FormA() {
 
   const handleConfirmSend = async () => {
       try {
-        console.log("Sending queries to the database...");
-        console.log(queries);
         const encodedQueries = btoa(JSON.stringify(queries));
 
         const res = await dispatchWorkflow({inputs: {queries: encodedQueries}});
-        if (res.ok) {
-          console.log("Queries sent successfully.");
-          
+        if (res.ok) {          
           setQueries({}); // Clear queries after sending
           setNumOfQueries(0); // Reset the number of queries
           setStatus('Your data has been sent to the database.');
@@ -112,8 +108,7 @@ export default function FormA() {
             onChange={(e) => setFamily(e.target.value)}
             className="border p-2"
         >
-            {
-            familyOptions.map((fam) => (                
+            {familyOptions.map((fam) => (                
                 <option key={fam.TF_family_id} value={fam.TF_family_id}>
                     {fam.name}
                 </option>

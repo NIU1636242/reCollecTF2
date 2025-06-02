@@ -1,8 +1,7 @@
 
-const dispatchUrl = "https://collectf.vercel.app/api/functions/send-form.ts"//DEV: "http://localhost:3000/api/auth/functions/send-form.ts";
+const dispatchUrl = "http://localhost:3000/api/auth/functions/send-form.ts"//DEV: "https://collectf.vercel.app/api/functions/send-form.ts";
 
 export async function dispatchWorkflow(data) {
-  console.log("Dispatching workflow with data:", data);
   
   const res = await fetch(dispatchUrl, {
     method: 'POST',

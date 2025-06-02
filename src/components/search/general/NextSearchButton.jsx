@@ -1,11 +1,12 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
-function BackButton({searchStep, setStep}) {
+function NextSearchButton() {
+    const { step } = useParams();
+    const searchStep = parseInt(step);
     const navigate = useNavigate();
 
     const goToNext = () => {
         const nextStep = searchStep + 1
-        setStep(nextStep)
         navigate (`/CollecTF/Search/${nextStep}`)
     }
 
@@ -14,4 +15,4 @@ function BackButton({searchStep, setStep}) {
     );
   }
 
-export default BackButton;
+export default NextSearchButton;

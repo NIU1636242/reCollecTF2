@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import SearchButton from "./SearchButton";
+import SearchButton from "./search/general/SearchButton";
 import LoginButton from "./LoginButton";
 import WriteButton from "./WriteButton";
 import "./Header.css";

@@ -1,7 +1,7 @@
 //import { useNavigate } from "react-router-dom";
 //import "./Login.css";
-const loginUrl = "https://collectf.vercel.app/api/auth/login"; // to be changed in prod
-const logoutUrl = "https://collectf.vercel.app/api/auth/logout"; // to be changed in prod
+const loginUrl = "https://localhost:3000/api/auth/login"; // to be changed in prod: "https://collectf.vercel.app/api/auth/login"
+const logoutUrl = "https://localhost:3000/api/auth/logout"; // to be changed in prod: "https://collectf.vercel.app/api/auth/logout"
 
 function LoginButton({ userStatus, user, loading }) {
 

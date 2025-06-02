@@ -1,7 +1,5 @@
 import { createDbWorker } from "sql.js-httpvfs";
 
-//console.log("Before error");
-
 const workerUrl = new URL("sql.js-httpvfs/dist/sqlite.worker.js", import.meta.url).toString();
 const wasmUrl   = new URL("sql.js-httpvfs/dist/sql-wasm.wasm",   import.meta.url).toString();
 
