@@ -36,7 +36,7 @@ export default function FormA() {
     // Transform inputs to SQL queries
 
     if (action === 'save' && family !== 0) {
-      const newQuery = `INSERT INTO core_tf (name, family_id, description) VALUES ('${name}', ${family}, '${description}')`;
+      const newQuery = `INSERT INTO core_tf (name, family_id, description) VALUES ('${name}', ${family}, '${description}');`;
       setQueries((prev) => {
 
         if (Object.values(prev).includes(newQuery)) {
@@ -124,7 +124,7 @@ export default function FormA() {
         />
       </label>
       
-      <button disabled={numOfQueries >= 10} type="submit" name="action" value="save" className="bg-blue-500 text-white px-4 py-2">Save</button>
+      <button disabled={numOfQueries >= 40} type="submit" name="action" value="save" className="bg-blue-500 text-white px-4 py-2">Save</button>
       <button disabled={numOfQueries === 0} type="submit" name="action" value="send" className="bg-blue-500 text-white px-4 py-2">Send to DATABASE</button>
       {numOfQueries > 0 && !showModal && (
         Object.entries(queries).map(([key, query]) => (
