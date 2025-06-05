@@ -124,7 +124,7 @@ export default function FormA() {
         />
       </label>
       
-      <button disabled={numOfQueries >= 40} type="submit" name="action" value="save" className="bg-blue-500 text-white px-4 py-2">Save</button>
+      <button type="submit" name="action" value="save" className="bg-blue-500 text-white px-4 py-2">+</button>
       <button disabled={numOfQueries === 0} type="submit" name="action" value="send" className="bg-blue-500 text-white px-4 py-2">Send to DATABASE</button>
       {numOfQueries > 0 && !showModal && (
         Object.entries(queries).map(([key, query]) => (

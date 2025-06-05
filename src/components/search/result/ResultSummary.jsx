@@ -3,6 +3,9 @@ import ResultView from './ResultView';
 
 const ResultSummary = ({result}) => {
 
+
+
+
     const [isShown, setIsShown] = useState(false);
 
     return (
