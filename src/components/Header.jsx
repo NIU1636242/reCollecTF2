@@ -12,7 +12,7 @@ const Header = () => {
     const { user, userStatus, loading } = useUser();
     
     const handleLogoClick = () => {
-        navigate("/CollecTF/");
+        navigate("/");
     };
 
     return (

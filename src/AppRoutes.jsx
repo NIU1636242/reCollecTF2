@@ -12,7 +12,7 @@ function AppRoutes() {
   return (
     <HashRouter>
       <Routes>
-        <Route path="/CollecTF" element={<Layout />}>
+        <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="Search/:step?" element={<SearchPage />}>
           </Route>

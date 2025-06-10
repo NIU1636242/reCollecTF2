@@ -50,7 +50,7 @@ function SearchPage() {
 
 
     const startSearch = () => {
-        navigate('/CollecTF/Search/1'); 
+        navigate('/Search/1'); 
     }
 
     return (
@@ -84,7 +84,7 @@ function SearchPage() {
                     <li className="text-left">RESULT - Individual (TF/species) and/or ensemble (multiTF/species) reports.</li>
                 </ul>
                 <button className="btn" onClick={startSearch}>START SEARCHING</button>
-                <button className="btn" onClick={() => navigate('/CollecTF/')}>Back to HOME</button>
+                <button className="btn" onClick={() => navigate('/')}>Back to HOME</button>
             </div>
             ) : step === "1" ? (
             <SearchStep />

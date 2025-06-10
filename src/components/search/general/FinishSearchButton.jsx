@@ -8,7 +8,7 @@ function FinishSearchButton() {
     const navigate = useNavigate();
 
     const handleFinish = () => {
-      navigate("/CollecTF/Search/4")
+      navigate("/Search/4")
     }
 
     return (
