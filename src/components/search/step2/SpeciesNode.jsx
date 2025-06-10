@@ -109,14 +109,15 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
 
     return (
         <section className='text-left ml-4'>
-            <ul>
-                <li>
+            <ul className="list-none pl-16 ml-32">
+                <li className="my-2.5">
                     <span onClick={() => toggleNodeOpen(node.id)} className="cursor-pointer select-none">
                             {species.get(node.id).isOpen ? '▾' : '▸'}
                     </span>
-                    <label>
+                    <label className="inline-flex items-center gap-2">
                         <span>
                             <input
+                                className="form-control"
                                 type="checkbox"
                                 id={node.id}
                                 value={node.id}
@@ -132,7 +133,7 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
                             <strong>{node.name}</strong>
                         </span>
                     </label>
-                    <ul>
+                     <ul className="list-none pl-16 ml-32">
                         {species.get(node.id).isOpen && species.get(node.id).children.map((child) => {
                             return (
                                 <SpeciesNode 

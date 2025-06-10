@@ -414,12 +414,6 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
                 />
             )}
             {searchStep === 2 && (
-                <button onClick={() => console.log("species", species, "roots", roots, "allSpecies", allSpecies)}
-                    className="btn btn-primary mb-3">
-                    Debug Species
-                </button>
-            )}
-            {searchStep === 2 && (
                 <Species 
                     species={species} 
                     setSpecies={setSpecies}
@@ -451,8 +445,9 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
             )}
             { searchStep === 3 && (techniqueSearchNumber == 0 || techniqueSearchNumber == 1) && (         
                 <>   
-                    <label>
+                    <label className="inline-flex items-center gap-2">
                         <input 
+                            className="form-control"
                             type="radio" 
                             onChange = {() => handleChange(techniqueSearchNumber, true)}
                             checked={andOrTuple[techniqueSearchNumber]}
@@ -460,8 +455,9 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
                         AND
                     </label><br />
 
-                    <label>
+                    <label className="inline-flex items-center gap-2">
                         <input 
+                            className="form-control"
                             type="radio" 
                             onChange = {() => handleChange(techniqueSearchNumber, false)}
                             checked={!andOrTuple[techniqueSearchNumber]}

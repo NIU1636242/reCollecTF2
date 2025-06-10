@@ -8,11 +8,11 @@ function FinishSearchButton() {
     const navigate = useNavigate();
 
     const handleFinish = () => {
-      navigate("/CollecTF/Search/4")
+      navigate("/Search/4")
     }
 
     return (
-      <button onClick={handleFinish}>FINISH</button>
+      <button className="btn" onClick={handleFinish}>FINISH</button>
     );
   }
 

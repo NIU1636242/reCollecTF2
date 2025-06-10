@@ -8,15 +8,15 @@ function BackSearchButton() {
     const handleBack = () => {
       const backStep = searchStep - 1
       if (backStep < 1) {
-        navigate('/CollecTF/Search');
+        navigate('/Search');
       } else {
         // Navigate to the previous step
-        navigate(`/CollecTF/Search/${backStep}`)
+        navigate(`/Search/${backStep}`)
       }
     }
 
     return (
-      <button onClick={handleBack}>BACK</button>
+      <button className="btn" onClick={handleBack}>BACK</button>
     );
   }
 

@@ -21,10 +21,11 @@ function SearchParams({ selectedData, setSelectedData}) {
       <>
         {(searchStep === 1 || searchStep === 2) && (
             <input
-              type="text" 
-              placeholder="Search..."
-              value={searchTerms[indexStep]}
-              onChange={handleChange}
+                className="form-control"
+                type="text" 
+                placeholder="Search..."
+                value={searchTerms[indexStep]}
+                onChange={handleChange}
             />
         )}
         {searchStep == 1 && (            
@@ -48,6 +49,7 @@ function SearchParams({ selectedData, setSelectedData}) {
             {[...Array(3)].map((_, techniqueSearchNumber) => (
               <React.Fragment key={techniqueSearchNumber}>
                 <input
+                className="form-control"
                 type="text" 
                 placeholder="Search..."
                 value={searchTerms[indexStep][techniqueSearchNumber]}
@@ -62,6 +64,7 @@ function SearchParams({ selectedData, setSelectedData}) {
                 }}
                 />
                 <select
+                    className="form-control"
                     value={categorySelected[techniqueSearchNumber]}
                     onChange={(e) => {
                             const newCategorySelected = [...categorySelected];

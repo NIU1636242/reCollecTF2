@@ -7,11 +7,11 @@ function NextSearchButton() {
 
     const goToNext = () => {
         const nextStep = searchStep + 1
-        navigate (`/CollecTF/Search/${nextStep}`)
+        navigate (`/Search/${nextStep}`)
     }
 
     return (
-      <button onClick={goToNext}>NEXT</button>
+      <button className="btn" onClick={goToNext}>NEXT</button>
     );
   }
 

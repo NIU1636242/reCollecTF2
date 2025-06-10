@@ -15,8 +15,7 @@ function SearchStep() {
     return (
         <>
             <BackSearchButton />
-            {(searchStep === 3) ? <><FinishSearchButton selectedData={setSelectedData}/>             
-            <button onClick={() => console.log(selectedData) }>Log Selected Data</button> </>
+            {(searchStep === 3) ? <FinishSearchButton selectedData={setSelectedData}/>             
             :
             <NextSearchButton />
             }

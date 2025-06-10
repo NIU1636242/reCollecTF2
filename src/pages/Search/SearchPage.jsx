@@ -1,7 +1,6 @@
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 import { useState } from "react";
 import { SearchContext } from "../../components/contexts/SearchContext";
-import "./SearchPage.css"
 import SearchResults from "../../components/search/result/SearchResults";
 import SearchStep from "../../components/search/general/SearchStep";
 
@@ -51,7 +50,7 @@ function SearchPage() {
 
 
     const startSearch = () => {
-        navigate('/CollecTF/Search/1'); 
+        navigate('/Search/1'); 
     }
 
     return (
@@ -76,16 +75,16 @@ function SearchPage() {
         }}>
         {isIntro ? (
             <div className="search-page">
-                <h1>Search in CollecTF</h1>
+                <h1 className="text-5xl mb-4">Search in CollecTF</h1>
                 <h2>How does it work?</h2>
                 <ul>
-                    <li>STEP 1 - Select a Transcription Factor Family or Instance</li>
-                    <li>STEP 2 - Select a taxonomic unit (species)</li>
-                    <li>STEP 3 - Select a set of experimental techniques that should back the reported sites.</li>
-                    <li>RESULT - Individual (TF/species) and/or ensemble (multiTF/species) reports.</li>
+                    <li className="text-left">STEP 1 - Select a Transcription Factor Family or Instance</li>
+                    <li className="text-left">STEP 2 - Select a taxonomic unit (species)</li>
+                    <li className="text-left">STEP 3 - Select a set of experimental techniques that should back the reported sites.</li>
+                    <li className="text-left">RESULT - Individual (TF/species) and/or ensemble (multiTF/species) reports.</li>
                 </ul>
-                <button onClick={startSearch}>START SEARCHING</button>
-                <button onClick={() => navigate('/CollecTF/')}>Back to HOME</button>
+                <button className="btn" onClick={startSearch}>START SEARCHING</button>
+                <button className="btn" onClick={() => navigate('/')}>Back to HOME</button>
             </div>
             ) : step === "1" ? (
             <SearchStep />

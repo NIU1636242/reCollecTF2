@@ -6,7 +6,7 @@ function SearchButton() {
     const navigate = useNavigate();
 
     return (
-      <button onClick={() => navigate("/CollecTF/Search")} className="search-button">
+      <button onClick={() => navigate("/Search")} className="btn">
         SEARCH
       </button>
     );
