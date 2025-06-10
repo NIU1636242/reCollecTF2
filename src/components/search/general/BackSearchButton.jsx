@@ -16,7 +16,7 @@ function BackSearchButton() {
     }
 
     return (
-      <button onClick={handleBack}>BACK</button>
+      <button className="btn" onClick={handleBack}>BACK</button>
     );
   }
 

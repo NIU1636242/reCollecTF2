@@ -4,7 +4,7 @@ const WriteButton = () => {
 
     const navigate = useNavigate();
 
-    return (<button onClick={ () => {navigate("/CollecTF/Write")}}>Write</button>)
+    return (<button className="btn" onClick={ () => {navigate("/CollecTF/Write")}}>Write</button>)
 }
 
 export default WriteButton;

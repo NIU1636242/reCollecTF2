@@ -2,7 +2,6 @@ import { useNavigate } from "react-router-dom";
 import SearchButton from "./search/general/SearchButton";
 import LoginButton from "./LoginButton";
 import WriteButton from "./WriteButton";
-import "./Header.css";
 import { useUser } from "./contexts/UserContext";
 
 
@@ -17,9 +16,9 @@ const Header = () => {
     };
 
     return (
-        <header className="header">
+        <header className="flex justify-between items-center bg-surface px-8 py-4 border-b border-border">
 
-        <h1 className="text-blue-400" onClick={handleLogoClick}>
+        <h1 className="text-5xl font-bold text-accent cursor-pointer hover:text-text" onClick={handleLogoClick}>
             CollecTF
         </h1>
 

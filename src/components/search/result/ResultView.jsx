@@ -1,10 +1,73 @@
 
-const ResultSummary = ({result, setIsShown}) => {
+const ResultSummary = ({result}) => {
 
-
+    const TF_NAME = result.TF_name
+    const TF_species = result.TF_species
+    
     return (
         <>
-            <h1>Result View</h1>
+            <table className="table-auto w-full border-collapse border border-gray-400 text-center">
+
+            <thead>
+                <tr>
+                    <th className="border p-2">Genome</th>
+                    <th className="border p-2">TF</th>
+                    <th className="border p-2">TF conformation</th>
+                    <th className="border p-2">Site Sequence</th>
+                    <th className="border p-2">Site Location</th>
+                    <th className="border p-2">Experimental Techniques</th>
+                    <th className="border p-2">Gene Regulation</th>
+                    <th className="border p-2">Curation</th>
+                    <th className="border p-2">PMID</th>
+                </tr>
+            </thead>
+            <tbody>
+                {Array.from(result.table_data.entries()).map(([dataId, data]) => (
+                    <tr key={dataId}>
+                        <td className="border p-2">{data.genome_accession}</td>
+                        <td className="border p-2">{TF_NAME}</td>
+                        <td className="border p-2">{data.TF_type}</td>
+                        <td className="border p-2">{data.annotated_seq}</td>
+                        <td className="border p-2">{`${data.strand == '-1' ? '- ' : data.strand == '1' ? '+ ' : ''} [${data.start}, ${data.end}]`}</td>
+                        <td className="border p-2">
+                            {data.techniques
+                                .map((technique) =>
+                                    technique.EO_term
+                                    ? `${technique.tech_name} (${technique.EO_term})`
+                                    : technique.tech_name
+                                )
+                                .join(', ')
+                            }
+                        </td>
+                        <td className="border p-2">
+                            {data.gene_regulation
+                                .map((geneReg) =>
+                                    geneReg.gene_name && geneReg.locus_tag
+                                    ? (
+                                        <span key={geneReg.locus_tag}>
+                                            {geneReg.gene_name} (
+                                            <a
+                                                className="text-blue-500 hover:underline"
+                                                href={`https://www.ncbi.nlm.nih.gov/gene/?term=${geneReg.locus_tag}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                >
+                                                {geneReg.locus_tag}
+                                            </a>
+                                            )
+                                        </span>
+                                        )
+                                    : geneReg.tech_name
+                                )
+                                .reduce((prev, curr) => prev === null ? [curr] : [...prev, ', ', curr], null)
+                            }
+                        </td>
+                        <td className="border p-2">{data.curation_id}</td>
+                        <td className="border p-2">{data.pmid}</td>
+                    </tr>
+                ))}
+            </tbody>
+            </table>
         </>
     )
 

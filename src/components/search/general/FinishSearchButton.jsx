@@ -12,7 +12,7 @@ function FinishSearchButton() {
     }
 
     return (
-      <button onClick={handleFinish}>FINISH</button>
+      <button className="btn" onClick={handleFinish}>FINISH</button>
     );
   }
 

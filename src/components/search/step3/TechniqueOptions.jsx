@@ -146,15 +146,16 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
 
     return (
         <section className='text-left'>            
-            <ul>
+            <ul className="list-none pl-16 ml-32">
                 {Array.from(techniques.entries()).map(([categoryId, categoryData]) => (
-                    <li key={categoryId}>
+                    <li className="my-2.5" key={categoryId}>
                         <span onClick={() => toggleCategoryOpen(categoryId)} className="cursor-pointer select-none">
                             {categoryData.isOpen ? '▾' : '▸'}
                         </span>
-                        <label key={categoryId}>
+                        <label className="inline-flex items-center gap-2" key={categoryId}>
                             <span>
                                 <input
+                                    className="form-control"
                                     type="checkbox"
                                     id={categoryId}
                                     value={categoryId}
@@ -171,11 +172,12 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
                         </label>
 
                         {categoryData.isOpen &&(
-                            <ul>                    
+                            <ul className="list-none pl-16 ml-32">                    
                                 {categoryData.category_techniques.map((technique) => (
-                                    <li key={`${categoryId}-${technique.id}`}>
-                                        <label>
+                                    <li className="my-2.5" key={`${categoryId}-${technique.id}`}>
+                                        <label className="inline-flex items-center gap-2">
                                             <input
+                                                className="form-control"
                                                 type="checkbox"
                                                 id={`${categoryId}-${technique.id}`}
                                                 value={`${categoryId}-${technique.id}`}

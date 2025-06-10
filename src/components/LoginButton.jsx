@@ -10,13 +10,13 @@ function LoginButton({ userStatus, user, loading }) {
         {loading && <p>Loading...</p>}
         {(userStatus == 1 || userStatus == 2) && user && !loading && <b>{user}</b>}
         {userStatus == 0 && !loading &&
-          <a href={loginUrl}>
-            <button>Log In With GitHub</button>
+          <a className="text-accent no-underline hover:underline" href={loginUrl}>
+            <button className="btn">Log In With GitHub</button>
           </a>
         }
         {(userStatus == 1 || userStatus == 2) && !loading &&
-          <a href={logoutUrl}>
-          <button>Log out</button>
+          <a className="text-accent no-underline hover:underline" href={logoutUrl}>
+          <button className="btn">Log out</button>
           </a>
         }
       </>

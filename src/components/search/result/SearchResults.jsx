@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 function SearchResults() {
 
-    const {selectedData, setSelectedData } = useSearch();
+    const {selectedData } = useSearch();
 
     // Get results data
 
@@ -35,12 +35,9 @@ function SearchResults() {
     //Doubts:
         // _seq from core_siteinstance and annotated_seq from core_curation_siteinstance are the same?
  
-    //TODO: Use effect to fetch results based on selectedData
-
     useEffect(() => {
         let initResults = new Map()
-        getSearchResults().then((res => {
-            console.log(res);
+        getSearchResults(selectedData.TF, selectedData.Species, selectedData.Techniques).then((res => {
             res.forEach(row => {
 
                 //1: Unique instance for each result
@@ -89,17 +86,32 @@ function SearchResults() {
                 if (!currentData.gene_regulation.some(g => `${g.gene_name}-${g.locus_tag}` === geneKey)) {
                     currentData.gene_regulation.push({ gene_name: row.gene_name, locus_tag: row.locus_tag });
                 }
+            
             });
-            console.log(initResults);
-            setResults(initResults);
-        }))
 
+            const sortedResults = new Map(
+                Array.from(initResults.entries()).sort(([, valA], [, valB]) => {
+                    const nameA = valA.TF_name.toLowerCase();
+                    const nameB = valB.TF_name.toLowerCase();
+                    if (nameA < nameB) return -1;
+                    if (nameA > nameB) return 1;
+
+                    const speciesA = valA.TF_species.toLowerCase();
+                    const speciesB = valB.TF_species.toLowerCase();
+                    return speciesA.localeCompare(speciesB);
+                })
+            );
+
+            console.log(sortedResults);
+            setResults(sortedResults);
+        }))
     }, [])
 
-    //TODO: Print ResultSummary component for each result
     return (
         <>
-            <ResultSummary />
+            {Array.from(results.entries()).map(([summaryId, summaryData]) => 
+                <ResultSummary key={summaryId} result={summaryData}/>
+            )}
         </>
     );
 }

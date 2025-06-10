@@ -11,7 +11,7 @@ function NextSearchButton() {
     }
 
     return (
-      <button onClick={goToNext}>NEXT</button>
+      <button className="btn" onClick={goToNext}>NEXT</button>
     );
   }
 

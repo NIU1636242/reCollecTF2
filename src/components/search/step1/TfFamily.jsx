@@ -1,4 +1,3 @@
-import "./TfFamily.css"
 import { getFamilyIdByTf } from "@/db/queries/search"
 import React from "react"
 
@@ -149,15 +148,16 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
 
     return (
         <section className='text-left'>    
-            <ul>  
+            <ul className="list-none pl-16 ml-32">  
                 {Array.from(families.entries()).map(([familyId, familyData]) => (
-                    <li key={familyId} >
+                    <li className="my-2.5" key={familyId} >
                         <span onClick={() => toggleFamilyOpen(familyId)} className="cursor-pointer select-none">
                             {familyData.isOpen ? '▾' : '▸'}
                         </span>
-                        <label key={familyId}>
+                        <label className="inline-flex items-center gap-2" key={familyId}>
                             <span>
                                 <input
+                                    className="form-control"
                                     type="checkbox"
                                     id={familyId}
                                     value={familyId}
@@ -174,11 +174,12 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
                         </label>
 
                         {familyData.isOpen && (
-                            <ul>                    
+                            <ul className="list-none pl-16 ml-32">                    
                                 {familyData.family_elements.map((tf) => (
-                                <li key={tf.id}>
-                                    <label>
+                                <li className="my-2.5" key={tf.id}>
+                                    <label className="inline-flex items-center gap-2">
                                         <input
+                                            className="form-control"
                                             type="checkbox"
                                             id={tf.id}
                                             value={tf.id}

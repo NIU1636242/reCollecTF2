@@ -94,8 +94,8 @@ export async function getExpTechniques() {
 
 const placeholders = (arr) => arr.map(() => '?').join(',');
 
-export async function getSearchResults() {
-    /*const conditions = [];
+export async function getSearchResults(tfIds, speciesIds, expTechniques) {
+    const conditions = [];
     const values = [];
 
     //Doubts:
@@ -113,7 +113,8 @@ export async function getSearchResults() {
 
     if (expTechniques.length > 0) {
         conditions.push(`ET.technique_id IN (${placeholders(expTechniques)})`);
-        values.push(...expTechniques);
+        const cleanExpTechniques = expTechniques.map(t => t.split('-')[1])
+        values.push(...cleanExpTechniques);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -139,8 +140,8 @@ export async function getSearchResults() {
         JOIN core_regulation REG ON CURSI.id = REG.curation_site_instance_id AND GENE.gene_id = REG.gene_id
         ${whereClause};
     `;
-    */
-
+    
+    /*
     const query = `
         SELECT
             TF.name AS TF_name, TFI.uniprot_accession, CUR.TF_species, CUR.curation_id, PUB.publication_type, PUB.pmid, 
@@ -164,34 +165,9 @@ export async function getSearchResults() {
         AND TAX.id IN (59)
         AND ET.technique_id IN (1)
         AND TFI.uniprot_accession IN ("P54292", "P25084")
-        AND CUR.TF_species="Pseudomonas aeruginosa UCBPP-PA14";
     `;
-
-    return runQuery(query);
-
-    ///EXAMPLE
-    /*
-        SELECT
-            TF.name, TFI.uniprot_accession, CUR.TF_species, CUR.curation_id, PUB.publication_type, PUB.pmid, CURSI.annotated_seq, CURSI.TF_type, ET.name, ET.EO_term,
-            SI.start, SI.end, SI.strand, GENOME.genome_accession, GENE.name, GENE.locus_tag
-        FROM 
-            core_tf TF
-        JOIN core_tfinstance TFI ON TF.TF_id = TFI.TF_id
-        JOIN core_curation_TF_instances CURTF ON TFI.TF_instance_id = CURTF.tfinstance_id
-        JOIN core_curation CUR ON CURTF.curation_id = CUR.curation_id
-        JOIN core_publication PUB ON CUR.publication_id = PUB.publication_id
-        JOIN core_curation_siteinstance CURSI ON CUR.curation_id = CURSI.curation_id
-        JOIN core_curation_siteinstance_experimental_techniques CURSIET ON CURSI.id = CURSIET.curation_siteinstance_id
-        JOIN core_experimentaltechnique ET ON CURSIET.experimentaltechnique_id = ET.technique_id
-        JOIN core_siteinstance SI ON CURSI.site_instance_id = SI.site_id
-        JOIN core_genome GENOME ON SI.genome_id = GENOME.genome_id
-        JOIN core_gene GENE ON GENOME.genome_id = GENE.genome_id
-        JOIN core_taxonomy TAX ON GENOME.taxonomy_id = TAX.id 
-        JOIN core_regulation REG ON CURSI.id = REG.curation_site_instance_id AND GENE.gene_id = REG.gene_id
-        WHERE TF.TF_id IN (54)
-        AND TAX.id IN (59)
-        AND ET.technique_id IN (1);
     */
+    return runQuery(query, values);
 }
 
 //Usage:

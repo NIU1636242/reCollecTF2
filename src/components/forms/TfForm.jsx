@@ -98,7 +98,7 @@ export default function FormA() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="border p-2"
+            className="form-control"
         />
       </label>
       <label>Family: 
@@ -106,7 +106,7 @@ export default function FormA() {
             required
             value={family}
             onChange={(e) => setFamily(e.target.value)}
-            className="border p-2"
+            className="form-control"
         >
             {familyOptions.map((fam) => (                
                 <option key={fam.TF_family_id} value={fam.TF_family_id}>
@@ -120,12 +120,12 @@ export default function FormA() {
             required
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="border p-2"
+            className="form-control"
         />
       </label>
       
-      <button type="submit" name="action" value="save" className="bg-blue-500 text-white px-4 py-2">+</button>
-      <button disabled={numOfQueries === 0} type="submit" name="action" value="send" className="bg-blue-500 text-white px-4 py-2">Send to DATABASE</button>
+      <button type="submit" name="action" value="save" className="btn">+</button>
+      <button disabled={numOfQueries === 0} type="submit" name="action" value="send" className="btn">Send to DATABASE</button>
       {numOfQueries > 0 && !showModal && (
         Object.entries(queries).map(([key, query]) => (
           <p key={key} className="text-gray-500">
@@ -140,7 +140,7 @@ export default function FormA() {
             <p className="mb-4 text-white">{status}</p>
             <div className="flex justify-end gap-2">
               <button
-                className="bg-teal-700 text-white px-4 py-2"
+                className="btn"
                 onClick={() => {
                   setShowModal(false);
                   setStatus('');
@@ -149,7 +149,7 @@ export default function FormA() {
                 No
               </button>
               <button
-                className="bg-green-500 text-white px-4 py-2"
+                className="btn"
                 onClick={handleConfirmSend}
               >
                 Yes
@@ -161,7 +161,7 @@ export default function FormA() {
 
       <button
         type="reset"
-        className="bg-gray-300 text-black px-4 py-2"
+        className="btn"
         onClick={handleReset} // Opcional: cerrar modal si está abierto
       >
         Reset

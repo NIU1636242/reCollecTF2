@@ -1,4 +1,3 @@
-import "./HomePage.css"
 import { useEffect } from "react";
 import { testQuery } from "../db/queries/search"; 
 
@@ -18,7 +17,7 @@ function AppPage() {
 
   return (
     <>
-      <h1>Welcome to CollecTF</h1>
+      <h1 className="text-5xl mb-4">Welcome to CollecTF</h1>
       <p>Developing Home Page</p>
     </>
   );
