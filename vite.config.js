@@ -15,7 +15,7 @@ export default defineConfig({
       name: 'vite-plugin-range-requets',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          if (req.url && req.url.endsWith('.db')) {
+          if (req.url && (req.url.endsWith('.db') || req.url.endsWith('.gz'))) {
             res.setHeader('Accept-Ranges', 'bytes')
           }
           next()

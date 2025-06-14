@@ -10,7 +10,7 @@ export const dbWorkerPromise = createDbWorker(
       from: "inline",
       config: {
         serverMode: "full",
-        url: "/CollecTF/CollecTF.db",
+        url: "/CollecTF/CollecTF.db.gz",
         requestChunkSize: 4096,  // fewer, larger requests
       },
     },
