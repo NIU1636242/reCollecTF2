@@ -34,7 +34,7 @@ jobs:
         if: ${{github.event.inputs.queries != 'false'}}
         run: |
           set -e
-          sqlite3 ./public/CollecTF.db < queries.sql
+          sqlite3 ./public/CollecTF.db.gz < queries.sql
 
       - name: Delete SQL queries file
         if: ${{github.event.inputs.queries != 'false'}}
@@ -47,7 +47,7 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add ./public/CollecTF.db
+          git add ./public/CollecTF.db.gz
           if ! git diff --cached --quiet; then
             git commit -m "Update database via workflow_dispatch"
             git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
