@@ -22,10 +22,10 @@ export async function getTFWithFamilies() {
 
     const query = `
     SELECT 
-        tff.TF_family_id as family_id, tff.name as family_name, 
+        tff.tf_family_id as family_id, tff.name as family_name, 
         tf.TF_id as element_id, tf.name as element_name
     FROM core_tffamily tff
-    LEFT JOIN core_tf tf ON tff.TF_family_id = tf.family_id
+    LEFT JOIN core_tf tf ON tff.tf_family_id = tf.family_id
     ORDER BY tff.name, tf.name;
     `
     //This will return something like this:
@@ -41,7 +41,7 @@ export async function getTFWithFamilies() {
 }
 
 export async function getAllTfFamilies() {
-    return runQuery("SELECT TF_family_id, name FROM core_tffamily")
+    return runQuery("SELECT tf_family_id, name FROM core_tffamily")
 }
 
 export async function getNameAndFamilyIdFromTf(tfId) {
