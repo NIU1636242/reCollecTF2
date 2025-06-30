@@ -55,8 +55,8 @@ function TfForm() {
         }
         
         if (action === 'send') {
-        setStatus('Are you sure you want to send the data to the database?');
-        setShowModal(true);
+            setStatus('Are you sure you want to send the data to the database?');
+            setShowModal(true);
         }
     };
 
@@ -141,15 +141,6 @@ function TfForm() {
                 <button type="reset" className="btn" onClick={handleReset}>Reset</button>
                 <button disabled={numOfQueries === 0} type="submit" name="action" value="send" className="btn">Send to DATABASE</button>
             </div>
-
-            {/* Queries output */}
-            {numOfQueries > 0 && !showModal && (
-                <div className="mt-2">
-                {Object.entries(queries).map(([key, query]) => (
-                    <p key={key} className="text-gray-500">{query}</p>
-                ))}
-                </div>
-            )}
 
             {/* Status message */}
             {status && <p className="text-green-500">{status}</p>}
