@@ -50,7 +50,10 @@ function TfForm() {
                     const newKey = `query${nextIndex}`;
                     return {...prev, [newKey]: newQuery}
                 });
-                const truncatedDescription = description.split(" ").slice(0, 7).join(" ") + "...";
+                const words = description.split(" ");
+                const truncatedDescription = words.length > 7 
+                    ? words.slice(0, 7).join(" ") + "..."
+                    : description;
                 const newDataDisplay = "Name: " + name + ", Description: " + truncatedDescription;
                 setDataDisplay((prev) => [...prev, newDataDisplay]);
                 setNumOfQueries((prev) => prev + 1);
@@ -125,7 +128,7 @@ function TfForm() {
                             Select...
                         </option>
                         {familyOptions.map((fam) => (
-                        <option key={fam.TF_family_id} value={fam.TF_family_id}>
+                        <option key={fam.tf_family_id} value={fam.tf_family_id}>
                             {fam.name}
                         </option>
                         ))}
