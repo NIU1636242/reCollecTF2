@@ -44,9 +44,9 @@ export async function getAllTfFamilies() {
     return runQuery("SELECT TF_family_id, name FROM core_tffamily")
 }
 
-export async function getFamilyIdByTf(tfId) {
+export async function getNameAndFamilyIdFromTf(tfId) {
     const query = `
-    SELECT family_id FROM core_tf tf
+    SELECT family_id, name FROM core_tf tf
     WHERE tf.TF_id = "${tfId}";
     `    
     return runQuery(query)
@@ -94,12 +94,12 @@ export async function getExpTechniques() {
 
 const placeholders = (arr) => arr.map(() => '?').join(',');
 
-export async function getSearchResults(tfIds, speciesIds, expTechniques) {
+export async function getSearchResults(tfs, species, expTechniques, andOrTuple) {
     const conditions = [];
     const values = [];
 
-    //Doubts:
-        // _seq from core_siteinstance and annotated_seq from core_curation_siteinstance are the same?
+    const tfIds = tfs.map(obj => obj.id);
+    const speciesIds = species.map(obj => obj.id);
 
     if (tfIds.length > 0) {
         conditions.push(`TF.TF_id IN (${placeholders(tfIds)})`);
@@ -111,10 +111,45 @@ export async function getSearchResults(tfIds, speciesIds, expTechniques) {
         values.push(...speciesIds);
     }
 
+    const firstConnector = andOrTuple[0] ? 'AND' : 'OR'
+    const secondConnector = andOrTuple[1] ? 'AND' : 'OR'
+    const firstCondition = []
+    const secondCondition = []
+    const thirdCondition = []
+    const conditionFragments = []
+
     if (expTechniques.length > 0) {
-        conditions.push(`ET.technique_id IN (${placeholders(expTechniques)})`);
-        const cleanExpTechniques = expTechniques.map(t => t.split('-')[1])
-        values.push(...cleanExpTechniques);
+        expTechniques.forEach(obj => {
+            const [searchNumber, categoryId, techniqueId] = obj.id.split('-');
+            if (searchNumber === '0') {
+                firstCondition.push(techniqueId)
+            }
+            else if (searchNumber === '1') {
+                secondCondition.push(techniqueId)
+            }
+            else if (searchNumber === '2') {
+                thirdCondition.push(techniqueId)
+            }
+        })
+
+        if (firstCondition.length > 0) {
+            conditionFragments.push(`(ET.technique_id IN (${placeholders(firstCondition)})`);
+            values.push(...firstCondition);
+        }
+        if (secondCondition.length > 0) {
+            const connector = conditionFragments.length > 0 ? firstConnector : '(';
+            conditionFragments.push(`${connector} ET.technique_id IN (${placeholders(secondCondition)})`);
+            values.push(...secondCondition);
+        }
+        if (thirdCondition.length > 0) {
+            const connector = conditionFragments.length > 0 ? secondConnector : '(';
+            conditionFragments.push(`${connector} ET.technique_id IN (${placeholders(thirdCondition)})`);
+            values.push(...thirdCondition);
+        }
+
+        if (conditionFragments.length > 0) {
+            conditions.push(conditionFragments.join(' ') + ')');
+        }
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -140,61 +175,7 @@ export async function getSearchResults(tfIds, speciesIds, expTechniques) {
         JOIN core_regulation REG ON CURSI.id = REG.curation_site_instance_id AND GENE.gene_id = REG.gene_id
         ${whereClause};
     `;
-    
-    /*
-    const query = `
-        SELECT
-            TF.name AS TF_name, TFI.uniprot_accession, CUR.TF_species, CUR.curation_id, PUB.publication_type, PUB.pmid, 
-            CURSI.annotated_seq, CURSI.TF_type, ET.name AS tech_name, ET.EO_term, SI.start, SI.end, SI.strand, 
-            GENOME.genome_accession, GENE.name AS gene_name, GENE.locus_tag
-        FROM 
-            core_tf TF
-        JOIN core_tfinstance TFI ON TF.TF_id = TFI.TF_id
-        JOIN core_curation_TF_instances CURTF ON TFI.TF_instance_id = CURTF.tfinstance_id
-        JOIN core_curation CUR ON CURTF.curation_id = CUR.curation_id
-        JOIN core_publication PUB ON CUR.publication_id = PUB.publication_id
-        JOIN core_curation_siteinstance CURSI ON CUR.curation_id = CURSI.curation_id
-        JOIN core_curation_siteinstance_experimental_techniques CURSIET ON CURSI.id = CURSIET.curation_siteinstance_id
-        JOIN core_experimentaltechnique ET ON CURSIET.experimentaltechnique_id = ET.technique_id
-        JOIN core_siteinstance SI ON CURSI.site_instance_id = SI.site_id
-        JOIN core_genome GENOME ON SI.genome_id = GENOME.genome_id
-        JOIN core_gene GENE ON GENOME.genome_id = GENE.genome_id
-        JOIN core_taxonomy TAX ON GENOME.taxonomy_id = TAX.id 
-        JOIN core_regulation REG ON CURSI.id = REG.curation_site_instance_id AND GENE.gene_id = REG.gene_id
-        WHERE TF.TF_id IN (54)
-        AND TAX.id IN (59)
-        AND ET.technique_id IN (1)
-        AND TFI.uniprot_accession IN ("P54292", "P25084")
-    `;
-    */
+
+    console.log("Executing query:", query);
     return runQuery(query, values);
 }
-
-//Usage:
-
-/*
-    import { useEffect, useState } from "react";
-    import { getFirstAndSecondExpTechniques } from "@/db/queries/search";
-
-    export default function BioSampleList() {
-        const [samples, setSamples] = useState([]);
-
-        useEffect(() => {
-            (async () => {
-            const result = await getAllBioSamples();
-            setSamples(result);
-            })();
-        }, []);
-
-        return (
-            <div>
-            <h2>Experimental tachniques</h2>
-            <ul>
-                {samples.map((row, i) => (
-                <li key={i}>{row.name}</li>
-                ))}
-            </ul>
-            </div>
-        );
-    }
-*/ 

@@ -6,12 +6,14 @@ const Technique = ({expressionTechniques, bindingTechniques, inSilicoTechniques,
     allBindingTechniques, setAllBindingTechniques, 
     allInSilicoTechniques, setAllInSilicoTechniques,
     selectedData, setSelectedData,
-    categorySelected}) => {
+    categorySelected, techniqueSearchNumber}) => {
     
     return (
         <>
             {categorySelected === "Select..." && (
-                <p>Please select a category to see the techniques.</p>
+                <div className="text-center mt-4 mb-4">
+                    <p>Please select a category to see the techniques.</p>
+                </div>
             )}
 
             {categorySelected === "Expression" && (
@@ -22,6 +24,7 @@ const Technique = ({expressionTechniques, bindingTechniques, inSilicoTechniques,
                     setAllTechniques={setAllExpressionTechniques}
                     selectedData={selectedData} 
                     setSelectedData={setSelectedData} 
+                    techniqueSearchNumber={techniqueSearchNumber}
                 />
             )}
             {categorySelected === "Binding" && (
@@ -32,6 +35,7 @@ const Technique = ({expressionTechniques, bindingTechniques, inSilicoTechniques,
                     setAllTechniques={setAllBindingTechniques}
                     selectedData={selectedData} 
                     setSelectedData={setSelectedData} 
+                    techniqueSearchNumber={techniqueSearchNumber}
                 />
             )}
             {categorySelected === "In Silico" && (
@@ -42,6 +46,7 @@ const Technique = ({expressionTechniques, bindingTechniques, inSilicoTechniques,
                     setAllTechniques={setAllInSilicoTechniques}
                     selectedData={selectedData} 
                     setSelectedData={setSelectedData} 
+                    techniqueSearchNumber={techniqueSearchNumber}
                 />
             )}
         </>

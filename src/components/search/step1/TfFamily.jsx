@@ -1,4 +1,4 @@
-import { getFamilyIdByTf } from "@/db/queries/search"
+import { getNameAndFamilyIdFromTf } from "@/db/queries/search"
 import React from "react"
 
 
@@ -49,7 +49,7 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
                 setSelectedData((prevState) => {
                     return {
                         ...prevState,
-                        TF: [...prevState.TF, tf.id]
+                        TF: [...prevState.TF, {name: tf.name, id: tf.id}]
                     }
                 })
             });
@@ -59,7 +59,7 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
                 setSelectedData((prevState) => {
                     return {
                         ...prevState,
-                        TF: prevState.TF.filter((item) => item !== tf.id)
+                        TF: prevState.TF.filter((item) => item.id !== tf.id)
                     }
                 })
             });
@@ -74,8 +74,9 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
         const newFamilies = new Map(families);
         const newAllFamilies = new Map(allFamilies);
 
-        const res = await getFamilyIdByTf(tfId);
+        const res = await getNameAndFamilyIdFromTf(tfId);
         const familyId = res[0].family_id;
+        const tfName = res[0].name;
 
         const currentFamily = newFamilies.get(familyId);
         const newStatus = isChecked ? 'checked' : 'unchecked';
@@ -98,7 +99,7 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
         const allChecked = updatedFamily.family_elements.every(tf => tf.status === 'checked');
         const allUnchecked = updatedFamily.family_elements.every(tf => tf.status === 'unchecked');
 
-        const newFamilyStatus = allChecked ? 'checked' : allUnchecked ? 'unchecked' : 'intermediate';
+        const newFamilyStatus = allChecked ? 'checked' : allUnchecked ? 'unchecked' : 'indeterminate';
     
         newFamilies.set(familyId, {
             ...updatedFamily,
@@ -114,14 +115,13 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
             return {
                 ...prevState,
                 TF: isChecked
-                    ? [...prevState.TF, tfId]
-                    : prevState.TF.filter((item) => item !== tfId)
+                    ? [...prevState.TF, {name: tfName, id: tfId}]
+                    : prevState.TF.filter((item) => item.id !== tfId)
             };
         });
         
         setFamilies(newFamilies);
         setAllFamilies(newAllFamilies);
-
     };
 
     const toggleFamilyOpen = (familyId) => {
@@ -145,56 +145,65 @@ const TfFamily = ({families, setFamilies, allFamilies, setAllFamilies, selectedD
         setAllFamilies(allNewFamilies);
     }
 
+    const familyEntries = Array.from(families.entries());
+    const itemsPerColumn = Math.ceil(familyEntries.length / 3);
+    const col1 = familyEntries.slice(0, itemsPerColumn);
+    const col2 = familyEntries.slice(itemsPerColumn, itemsPerColumn * 2);
+    const col3 = familyEntries.slice(itemsPerColumn * 2);
 
     return (
-        <section className='text-left'>    
-            <ul className="list-none pl-16 ml-32">  
-                {Array.from(families.entries()).map(([familyId, familyData]) => (
-                    <li className="my-2.5" key={familyId} >
-                        <span onClick={() => toggleFamilyOpen(familyId)} className="cursor-pointer select-none">
-                            {familyData.isOpen ? '▾' : '▸'}
-                        </span>
-                        <label className="inline-flex items-center gap-2" key={familyId}>
-                            <span>
-                                <input
-                                    className="form-control"
-                                    type="checkbox"
-                                    id={familyId}
-                                    value={familyId}
-                                    checked={families.get(familyId).status === 'checked'}
-                                    ref= {(el) => {
-                                        if (el) el.indeterminate = families.get(familyId)?.status === 'intermediate';
-                                    }}  
-                                    onChange={handleFamilyChange}
-                                />
-                            </span>
-                            <span>
-                                <strong>{familyData.family_name}</strong>
-                            </span>
-                        </label>
-
-                        {familyData.isOpen && (
-                            <ul className="list-none pl-16 ml-32">                    
-                                {familyData.family_elements.map((tf) => (
-                                <li className="my-2.5" key={tf.id}>
-                                    <label className="inline-flex items-center gap-2">
+        <section className='text-left'>
+            <div className="flex gap-8">  
+                {[col1, col2, col3].map((col, i) => (
+                    <ul key={i} className="flex-1 list-none">  
+                        {col.map(([familyId, familyData]) => (
+                            <li className="my-2.5" key={familyId} >
+                                <span onClick={() => toggleFamilyOpen(familyId)} className="cursor-pointer select-none">
+                                    {familyData.isOpen ? '▾' : '▸'}
+                                </span>
+                                <label className="inline-flex items-center gap-2 whitespace-nowrap" key={familyId}>
+                                    <span>
                                         <input
                                             className="form-control"
                                             type="checkbox"
-                                            id={tf.id}
-                                            value={tf.id}
-                                            checked={selectedData.TF.includes(tf.id)}
-                                            onChange={handleTfChange}
+                                            id={familyId}
+                                            value={familyId}
+                                            checked={families.get(familyId).status === 'checked'}
+                                            ref= {(el) => {
+                                                if (el) el.indeterminate = families.get(familyId)?.status === 'indeterminate';
+                                            }}  
+                                            onChange={handleFamilyChange}
                                         />
-                                    {tf.name}
-                                    </label>
-                                </li>
-                                ))}
-                            </ul>
-                        )}
-                    </li>
+                                    </span>
+                                    <span>
+                                        <strong>{familyData.family_name}</strong>
+                                    </span>
+                                </label>
+
+                                {familyData.isOpen && (
+                                    <ul className="list-none pl-1 ml-10">                    
+                                        {familyData.family_elements.map((tf) => (
+                                        <li className="my-2.5" key={tf.id}>
+                                            <label className="inline-flex items-center gap-2 whitespace-nowrap">
+                                                <input
+                                                    className="form-control"
+                                                    type="checkbox"
+                                                    id={tf.id}
+                                                    value={tf.id}
+                                                    checked={selectedData.TF.some(item => item.id === tf.id)}
+                                                    onChange={handleTfChange}
+                                                />
+                                            {tf.name}
+                                            </label>
+                                        </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
                 ))}
-            </ul>
+            </div>
         </section>
     )
 

@@ -1,12 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { getTFWithFamilies, getTaxonomy, getExpTechniques } from '../../../db/queries/search'
 import TfFamily from '../step1/TfFamily';
 import Species from '../step2/Species';
 import Technique from '../step3/Technique';
-import { useSearch } from '../../contexts/SearchContext';
+import { useSearch } from '@/contexts/SearchContext';
 
 const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedData, 
-    techniqueSearchNumber, andOrTuple, setAndOrTuple, categorySelected}) => {
+    techniqueSearchNumber, categorySelected}) => {
 
     const {
         // ALL DATA
@@ -49,10 +49,21 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
         setHasInitialized
     } = useSearch();
 
-    // Fetch data when the component mounts
-    useEffect(() => {
+    const [loading, setLoading] = useState(false);
 
+    // Fetch data when the component mounts
+    useEffect(() => {           
+        
+        let loadingTimeout = null;
+        
         if (searchStep === 1 && !hasInitialized[0]) { 
+
+            let hasLoaded = false;
+            loadingTimeout = setTimeout(() => {
+                if(!hasLoaded) {
+                    setLoading(true);
+                }
+            }, 500); // Show loading after 0.5 seconds
 
             //families : Map():
 
@@ -65,6 +76,7 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
             //Where 1, 2, 3 is family_id (key in the Map)
 
             let initFamilies = new Map() //We use Map to avoid duplicates
+            
 
             getTFWithFamilies().then((res) => {
                 res.forEach((row) => {
@@ -77,10 +89,14 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
                         })
                     }
                     initFamilies.get(row.family_id).family_elements.push({id: row.element_id, name: row.element_name, status: 'unchecked'})
+
                 })
  
                 setFamilies(initFamilies)
                 setAllFamilies(initFamilies)
+                hasLoaded = true;
+                clearTimeout(loadingTimeout);
+                setLoading(false);
                 setHasInitialized((prev) => {
                     const newInit = [...prev];
                     newInit[0] = true; 
@@ -92,6 +108,15 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
             });
         }
         else if (searchStep === 2 && !hasInitialized[1]) {
+
+            let hasLoaded = false;
+            loadingTimeout = setTimeout(() => {
+                if(!hasLoaded) {
+                    setLoading(true);
+                }
+            }, 500); // Show loading after 0.5 seconds
+
+
             let initTaxonomyMap = new Map() //We use Map to avoid duplicates
             let initRoots = []
             
@@ -135,6 +160,9 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
                 setAllSpecies(initTaxonomyMap)
                 setRoots(initRoots) 
                 setAllRoots(initRoots) 
+                hasLoaded = true;
+                clearTimeout(loadingTimeout);
+                setLoading(false)
                 setHasInitialized((prev) => {
                     const newInit = [...prev];
                     newInit[1] = true; 
@@ -146,6 +174,14 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
             });
         }
         else if (searchStep === 3 && !hasInitialized[2][techniqueSearchNumber]) {
+
+            let hasLoaded = false;
+            loadingTimeout = setTimeout(() => {
+                if(!hasLoaded) {
+                    setLoading(true);
+                }
+            }, 500); // Show loading after 0.5 seconds
+
             let initExpTechniques = new Map()
             let initBindingTechniques = new Map()
             let initInSilicoTechniques = new Map()
@@ -199,6 +235,9 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
                 setAllExpressionTechniques(initExpTechniques)
                 setAllBindingTechniques(initBindingTechniques)
                 setAllInSilicoTechniques(initInSilicoTechniques)
+                hasLoaded = true;
+                clearTimeout(loadingTimeout);
+                setLoading(false)
                 setHasInitialized((prev) => {
                     const newInit = [...prev];
                     newInit[2][techniqueSearchNumber] = true; 
@@ -208,42 +247,67 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
             .catch((error) => {
                 console.error("Error fetching Techniques names:", error);
             });
-        }        
+        }    
+        
+        return () => {if (loadingTimeout) {clearTimeout(loadingTimeout)};}
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
         if (searchStep == 1) {
+                            
+            if (searchTerm.length === 0) {
+                setFamilies(allFamilies);
+                return;
+            }
+
             const filteredFamilies = new Map();
 
-            allFamilies.forEach((value, key) => {
-                const filteredFamily = value.family_name.toLowerCase().includes(searchTerm.toLowerCase());                
-                if (filteredFamily) {                    
+            allFamilies.forEach((value, key) => {        
+                
+                if (value.status === 'checked' || value.status === 'indeterminate') {
                     filteredFamilies.set(key, {
                         status: value.status,
-                        isOpen: value.isOpen,
+                        isOpen: true,
                         family_name: value.family_name,
                         family_elements: value.family_elements
                     });
                 }
                 else {
-                    const filteredTf = value.family_elements.filter((tf) => 
-                        tf.name.toLowerCase().includes(searchTerm.toLowerCase())
-                    );
-                    if (filteredTf.length > 0) {
+                    const filteredFamily = value.family_name.toLowerCase().includes(searchTerm.toLowerCase());                
+                    if (filteredFamily && searchTerm.length > 0) {                    
                         filteredFamilies.set(key, {
                             status: value.status,
-                            isOpen: value.isOpen,
+                            isOpen: true,
                             family_name: value.family_name,
-                            family_elements: filteredTf
-
+                            family_elements: value.family_elements
                         });
+                    }
+                    else {
+                        const filteredTf = value.family_elements.filter((tf) => 
+                            tf.name.toLowerCase().includes(searchTerm.toLowerCase())
+                        );
+                        if (filteredTf.length > 0) {
+                            filteredFamilies.set(key, {
+                                status: value.status,
+                                isOpen: true,
+                                family_name: value.family_name,
+                                family_elements: filteredTf
+                            });
+                        }
                     }
                 }
             });
             setFamilies(filteredFamilies);
+            return;
         }
         if (searchStep === 2) {
+
+            if(searchTerm.length === 0) {
+                setSpecies(allSpecies);
+                setRoots(allRoots);
+                return;
+            }
             
             const filteredSpecies = new Map();
             const filteredRoots = [];
@@ -256,11 +320,26 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
 
                 if (!fullNode) return null;
 
+                // CASE 1: Node is already selected
+                if (fullNode.status === 'checked' || fullNode.status === 'indeterminate') {
+                    filteredSpecies.set(node.id, {
+                        status: fullNode.status,
+                        isOpen: true,
+                        children: fullNode.children.map(c => ({ id: c.id, name: c.name }))
+                    });
+
+                    fullNode.children.forEach(child => {
+                        filterTaxonomy({ id: child.id, name: child.name }, true, searchTerm);
+                    });
+
+                    return { id: node.id, name: node.name };
+                }
+
                 // CASE 1: Parent or direct match
                 if (selfMatches || parentMatches) {
                     filteredSpecies.set(node.id, {
                         status: fullNode.status,
-                        isOpen: fullNode.isOpen,
+                        isOpen: true,
                         children: fullNode.children.map(c => ({ id: c.id, name: c.name }))
                     });
 
@@ -283,14 +362,14 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
                 if (filteredChildren.length > 0) {
                     filteredSpecies.set(node.id, {
                         status: fullNode.status,
-                        isOpen: fullNode.isOpen,
+                        isOpen: true,
                         children: filteredChildren.map(c => ({ id: c.id, name: c.name }))
                     });
 
                     return { id: node.id, name: node.name };
                 }
 
-                // Caso 3: no coincide ni tiene hijos que coincidan
+                // CASE 3: No match at all
                 return null;
             }
 
@@ -302,170 +381,193 @@ const SearchManagement = ({ searchStep, searchTerm, selectedData, setSelectedDat
             });
             setSpecies(filteredSpecies);
             setRoots(filteredRoots);
+            return;
         }
         else if (searchStep == 3) {
-            const filteredExpressionTechniques = new Map();
-            const filteredBindingTechniques = new Map();
-            const filteredInSilicoTechniques = new Map();
 
-            allExpressionTechniques.forEach((value, key) => {
-
-                const filteredCategory = value.category_name.toLowerCase().includes(searchTerm.toLowerCase());
-                if (filteredCategory) {
-                    filteredExpressionTechniques.set(key, {
-                        status: value.status,
-                        isOpen: value.isOpen,
-                        category_name: value.category_name,
-                        category_techniques: value.category_techniques
-                    });
+            if(searchTerm.length === 0) {
+                if (categorySelected === 'Expression') { 
+                    setExpressionTechniques(allExpressionTechniques);
                 }
-                else {
-                    const filteredTechniques = value.category_techniques.filter((technique) => 
-                        technique.name.toLowerCase().includes(searchTerm.toLowerCase())
-                    );
-                    if (filteredTechniques.length > 0) {
+                else if (categorySelected === 'Binding') {
+                    setBindingTechniques(allBindingTechniques);
+                }
+                else if (categorySelected === 'In Silico') {
+                    setInSilicoTechniques(allInSilicoTechniques);
+                }
+                return;
+            }
+
+            if (categorySelected === 'Expression') {  
+                const filteredExpressionTechniques = new Map();
+                allExpressionTechniques.forEach((value, key) => {
+                    if (value.status === 'checked' || value.status === 'indeterminate') {
                         filteredExpressionTechniques.set(key, {
                             status: value.status,
-                            isOpen: value.isOpen,
+                            isOpen: true,
                             category_name: value.category_name,
-                            category_techniques: filteredTechniques
+                            category_techniques: value.category_techniques
                         });
                     }
-                }
-            });
-
-            allBindingTechniques.forEach((value, key) => {
-                const filteredCategory = value.category_name.toLowerCase().includes(searchTerm.toLowerCase());
-                if (filteredCategory) {
-                    filteredBindingTechniques.set(key, {
-                        status: value.status,
-                        isOpen: value.isOpen,
-                        category_name: value.category_name,
-                        category_techniques: value.category_techniques
-                    });
-                }
-                else {
-                    const filteredTechniques = value.category_techniques.filter((technique) => 
-                        technique.name.toLowerCase().includes(searchTerm.toLowerCase())
-                    );
-                    if (filteredTechniques.length > 0) {
+                    else {
+                        const filteredCategory = value.category_name.toLowerCase().includes(searchTerm.toLowerCase());
+                        if (filteredCategory) {
+                            filteredExpressionTechniques.set(key, {
+                                status: value.status,
+                                isOpen: true,
+                                category_name: value.category_name,
+                                category_techniques: value.category_techniques
+                            });
+                        }
+                        else {
+                            const filteredTechniques = value.category_techniques.filter((technique) => 
+                                technique.name.toLowerCase().includes(searchTerm.toLowerCase())
+                            );
+                            if (filteredTechniques.length > 0) {
+                                filteredExpressionTechniques.set(key, {
+                                    status: value.status,
+                                    isOpen: true,
+                                    category_name: value.category_name,
+                                    category_techniques: filteredTechniques
+                                });
+                            }
+                        }
+                    }
+                });
+                setExpressionTechniques(filteredExpressionTechniques);
+            }
+            else if (categorySelected === 'Binding') {
+                const filteredBindingTechniques = new Map();
+                allBindingTechniques.forEach((value, key) => {
+                    if (value.status === 'checked' || value.status === 'indeterminate') {
                         filteredBindingTechniques.set(key, {
                             status: value.status,
-                            isOpen: value.isOpen,
+                            isOpen: true,
                             category_name: value.category_name,
-                            category_techniques: filteredTechniques
+                            category_techniques: value.category_techniques
                         });
                     }
-                }
-            });
-
-            allInSilicoTechniques.forEach((value, key) => {
-                const filteredCategory = value.category_name.toLowerCase().includes(searchTerm.toLowerCase());
-                if (filteredCategory) {
-                    filteredInSilicoTechniques.set(key, {
-                        status: value.status,
-                        isOpen: value.isOpen,
-                        category_name: value.category_name,
-                        category_techniques: value.category_techniques
-                    });
-                }
-                else {
-                    
-                    const filteredTechniques = value.category_techniques.filter((technique) => 
-                        technique.name.toLowerCase().includes(searchTerm.toLowerCase())
-                    );
-                    if (filteredTechniques.length > 0) {
+                    else {
+                        const filteredCategory = value.category_name.toLowerCase().includes(searchTerm.toLowerCase());
+                        if (filteredCategory) {
+                            filteredBindingTechniques.set(key, {
+                                status: value.status,
+                                isOpen: true,
+                                category_name: value.category_name,
+                                category_techniques: value.category_techniques
+                            });
+                        }
+                        else {
+                            const filteredTechniques = value.category_techniques.filter((technique) => 
+                                technique.name.toLowerCase().includes(searchTerm.toLowerCase())
+                            );
+                            if (filteredTechniques.length > 0) {
+                                filteredBindingTechniques.set(key, {
+                                    status: value.status,
+                                    isOpen: true,
+                                    category_name: value.category_name,
+                                    category_techniques: filteredTechniques
+                                });
+                            }
+                        }
+                    }
+                });
+                setBindingTechniques(filteredBindingTechniques);
+            }
+            else if (categorySelected === 'In Silico') {
+                const filteredInSilicoTechniques = new Map();
+                allInSilicoTechniques.forEach((value, key) => {
+                    if (value.status === 'checked' || value.status === 'indeterminate') {
                         filteredInSilicoTechniques.set(key, {
                             status: value.status,
-                            isOpen: value.isOpen,
+                            isOpen: true,
                             category_name: value.category_name,
-                            category_techniques: filteredTechniques
+                            category_techniques: value.category_techniques
                         });
                     }
-                }
-            });
-
-            setExpressionTechniques(filteredExpressionTechniques);
-            setBindingTechniques(filteredBindingTechniques);
-            setInSilicoTechniques(filteredInSilicoTechniques);
+                    else {
+                        const filteredCategory = value.category_name.toLowerCase().includes(searchTerm.toLowerCase());
+                        if (filteredCategory) {
+                            filteredInSilicoTechniques.set(key, {
+                                status: value.status,
+                                isOpen: true,
+                                category_name: value.category_name,
+                                category_techniques: value.category_techniques
+                            });
+                        }
+                        else {
+                            
+                            const filteredTechniques = value.category_techniques.filter((technique) => 
+                                technique.name.toLowerCase().includes(searchTerm.toLowerCase())
+                            );
+                            if (filteredTechniques.length > 0) {
+                                filteredInSilicoTechniques.set(key, {
+                                    status: value.status,
+                                    isOpen: true,
+                                    category_name: value.category_name,
+                                    category_techniques: filteredTechniques
+                                });
+                            }
+                        }
+                    }
+                });
+                setInSilicoTechniques(filteredInSilicoTechniques);
+            }
         }
 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchTerm]); 
 
-    const handleChange = (techniqueSearchNumber, state) => {
-        setAndOrTuple((prevState) => {
-            const newTuple = [...prevState];
-            newTuple[techniqueSearchNumber] = state;
-            return newTuple;
-        });
-    }
-
     return (
-        <>    
-            {searchStep === 1 && (
-                <TfFamily 
-                    families={families}
-                    setFamilies={setFamilies}
-                    allFamilies={allFamilies}
-                    setAllFamilies={setAllFamilies}
-                    selectedData={selectedData} 
-                    setSelectedData={setSelectedData}
-                />
-            )}
-            {searchStep === 2 && (
-                <Species 
-                    species={species} 
-                    setSpecies={setSpecies}
-                    allSpecies={allSpecies}
-                    setAllSpecies={setAllSpecies}
-                    roots={roots}
-                    selectedData={selectedData}
-                    setSelectedData={setSelectedData}
-                />
-            )}
-            {searchStep === 3 && (
-                <Technique 
-                    expressionTechniques={expressionTechniques}
-                    bindingTechniques={bindingTechniques}
-                    inSilicoTechniques={inSilicoTechniques}
-                    setExpressionTechniques={setExpressionTechniques}
-                    setBindingTechniques={setBindingTechniques}
-                    setInSilicoTechniques={setInSilicoTechniques}
-                    allExpressionTechniques={allExpressionTechniques}
-                    setAllExpressionTechniques={setAllExpressionTechniques}
-                    allBindingTechniques={allBindingTechniques}
-                    setAllBindingTechniques={setAllBindingTechniques}
-                    allInSilicoTechniques={allInSilicoTechniques}
-                    setAllInSilicoTechniques={setAllInSilicoTechniques}
-                    selectedData={selectedData}
-                    setSelectedData={setSelectedData}
-                    categorySelected={categorySelected}
-                />
-            )}
-            { searchStep === 3 && (techniqueSearchNumber == 0 || techniqueSearchNumber == 1) && (         
-                <>   
-                    <label className="inline-flex items-center gap-2">
-                        <input 
-                            className="form-control"
-                            type="radio" 
-                            onChange = {() => handleChange(techniqueSearchNumber, true)}
-                            checked={andOrTuple[techniqueSearchNumber]}
-                        />
-                        AND
-                    </label><br />
-
-                    <label className="inline-flex items-center gap-2">
-                        <input 
-                            className="form-control"
-                            type="radio" 
-                            onChange = {() => handleChange(techniqueSearchNumber, false)}
-                            checked={!andOrTuple[techniqueSearchNumber]}
-                        />
-                        OR
-                    </label> 
-                </>
-            )}
+        <>
+            { loading ? (
+                    <div className="animate-pulse text-gray-500 font-semibold text-2xl text-center mt-7">
+                        Loading...
+                    </div>
+                ) :
+                searchStep === 1 ? (
+                    <TfFamily 
+                        families={families}
+                        setFamilies={setFamilies}
+                        allFamilies={allFamilies}
+                        setAllFamilies={setAllFamilies}
+                        selectedData={selectedData} 
+                        setSelectedData={setSelectedData}
+                    />
+                ) : 
+                searchStep === 2 ? (
+                    <Species 
+                        species={species} 
+                        setSpecies={setSpecies}
+                        allSpecies={allSpecies}
+                        setAllSpecies={setAllSpecies}
+                        roots={roots}
+                        selectedData={selectedData}
+                        setSelectedData={setSelectedData}
+                    />
+                ) : searchStep === 3 ? (
+                    <>
+                    <Technique 
+                        expressionTechniques={expressionTechniques}
+                        bindingTechniques={bindingTechniques}
+                        inSilicoTechniques={inSilicoTechniques}
+                        setExpressionTechniques={setExpressionTechniques}
+                        setBindingTechniques={setBindingTechniques}
+                        setInSilicoTechniques={setInSilicoTechniques}
+                        allExpressionTechniques={allExpressionTechniques}
+                        setAllExpressionTechniques={setAllExpressionTechniques}
+                        allBindingTechniques={allBindingTechniques}
+                        setAllBindingTechniques={setAllBindingTechniques}
+                        allInSilicoTechniques={allInSilicoTechniques}
+                        setAllInSilicoTechniques={setAllInSilicoTechniques}
+                        selectedData={selectedData}
+                        setSelectedData={setSelectedData}
+                        categorySelected={categorySelected}
+                        techniqueSearchNumber={techniqueSearchNumber}
+                    />
+                    </>
+                ) : null
+            }
         </>
     );
 }

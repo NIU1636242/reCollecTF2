@@ -4,7 +4,7 @@ import HomePage from "./pages/HomePage";
 import SearchPage from "./pages/Search/SearchPage";
 import WritePage from "./pages/WritePage";
 import ProtectedRoute from "./components/ProtectedRoute";
-import { useUser } from "./components/contexts/UserContext";
+import { useUser } from '@/contexts/UserContext';
 
 function AppRoutes() {
   const { userStatus } = useUser();

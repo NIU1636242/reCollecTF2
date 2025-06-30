@@ -1,7 +1,7 @@
 import Technique from './Technique';
 import React from 'react';
 
-const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechniques, selectedData, setSelectedData}) => {
+const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechniques, selectedData, setSelectedData, techniqueSearchNumber}) => {
     
     const handleCategoryChange = (e) => {
 
@@ -18,6 +18,7 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
         const categoryId = Number(e.target.value)
         const isChecked = e.target.checked
         const categoryTechniques = techniques.get(categoryId).category_techniques;
+        const categoryName = techniques.get(categoryId).category_name;
         const newTechniques = new Map(techniques);
         const newAllTechniques = new Map(allTechniques);
         const currentCategory = newTechniques.get(categoryId);
@@ -49,7 +50,7 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
                 setSelectedData((prevState) => {
                     return {
                         ...prevState,
-                        Techniques: [...prevState.Techniques, `${categoryId}-${technique.id}`]
+                        Techniques: [...prevState.Techniques, {name: `${categoryName}: ${technique.name}`, id: `${techniqueSearchNumber}-${categoryId}-${technique.id}`}]
                     }
                 })
             });
@@ -59,7 +60,7 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
                 setSelectedData((prevState) => {
                     return {
                         ...prevState,
-                        Techniques: prevState.Techniques.filter((item) => item !== `${categoryId}-${technique.id}`)
+                        Techniques: prevState.Techniques.filter((item) => item.id !== `${techniqueSearchNumber}-${categoryId}-${technique.id}`)
                     }
                 })
             });
@@ -72,6 +73,9 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
     const handleTechniqueChange = (e) => {
         const categoryId = Number(e.target.value.split('-')[0]);
         const techniqueId = Number(e.target.value.split('-')[1]);
+        const categoryName = techniques.get(categoryId).category_name;
+        const technique = techniques.get(categoryId).category_techniques.find(t => t.id === techniqueId)
+        const techniqueName = technique.name;
         const isChecked = e.target.checked
         const newTechniques = new Map(techniques);
         const newAllTechniques = new Map(allTechniques);
@@ -97,7 +101,7 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
         const allChecked = updatedCategory.category_techniques.every(technique => technique.status === 'checked');
         const allUnchecked = updatedCategory.category_techniques.every(technique => technique.status === 'unchecked');
 
-        const newCategoryStatus = allChecked ? 'checked' : allUnchecked ? 'unchecked' : 'intermediate';
+        const newCategoryStatus = allChecked ? 'checked' : allUnchecked ? 'unchecked' : 'indeterminate';
         
         newTechniques.set(categoryId, {
             ...updatedCategory,
@@ -113,8 +117,8 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
             return {
                 ...prevState,
                 Techniques: isChecked
-                    ? [...prevState.Techniques, `${categoryId}-${techniqueId}`]
-                    : prevState.Techniques.filter((item) => item !== `${categoryId}-${techniqueId}`)
+                    ? [...prevState.Techniques, {name: `${categoryName}: ${techniqueName}`, id: `${techniqueSearchNumber}-${categoryId}-${techniqueId}`}]
+                    : prevState.Techniques.filter((item) => item.id !== `${techniqueSearchNumber}-${categoryId}-${techniqueId}`)
             };
         });
         
@@ -161,7 +165,7 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
                                     value={categoryId}
                                     checked={techniques.get(categoryId).status === 'checked'}
                                     ref= {(el) => {
-                                        if (el) el.indeterminate = techniques.get(categoryId)?.status === 'intermediate';
+                                        if (el) el.indeterminate = techniques.get(categoryId)?.status === 'indeterminate';
                                     }}  
                                     onChange={handleCategoryChange}
                                 />
@@ -172,16 +176,16 @@ const TechniqueOptions = ({techniques, setTechniques, allTechniques, setAllTechn
                         </label>
 
                         {categoryData.isOpen &&(
-                            <ul className="list-none pl-16 ml-32">                    
+                            <ul className="list-none pl-1 ml-10">                    
                                 {categoryData.category_techniques.map((technique) => (
                                     <li className="my-2.5" key={`${categoryId}-${technique.id}`}>
-                                        <label className="inline-flex items-center gap-2">
+                                        <label className="inline-flex items-center gap-2 whitespace-nowrap">
                                             <input
                                                 className="form-control"
                                                 type="checkbox"
                                                 id={`${categoryId}-${technique.id}`}
                                                 value={`${categoryId}-${technique.id}`}
-                                                checked={selectedData.Techniques.includes(`${categoryId}-${technique.id}`)}
+                                                checked={selectedData.Techniques.some(t => t.id === `${techniqueSearchNumber}-${categoryId}-${technique.id}`)}
                                                 onChange={handleTechniqueChange}
                                             />
                                         {technique.name}
