@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import SearchButton from "./search/general/SearchButton";
 import LoginButton from "./LoginButton";
 import WriteButton from "./WriteButton";
-import { useUser } from "./contexts/UserContext";
+import { useUser } from '@/contexts/UserContext';
 
 
 const Header = () => {
@@ -17,17 +17,17 @@ const Header = () => {
 
     return (
         <header className="flex justify-between items-center bg-surface px-8 py-4 border-b border-border">
+            <h1 className="text-5xl font-bold text-accent cursor-pointer hover:text-text" onClick={handleLogoClick}>
+                CollecTF
+            </h1>
 
-        <h1 className="text-5xl font-bold text-accent cursor-pointer hover:text-text" onClick={handleLogoClick}>
-            CollecTF
-        </h1>
+            <div className="flex items-center gap-4">
+                {(userStatus == 2) && <WriteButton />}
 
-        {(userStatus == 2) && <WriteButton />}
+                <SearchButton />
 
-        <SearchButton />
-
-        <LoginButton userStatus={userStatus} user={user} loading={loading}/>
-
+                <LoginButton userStatus={userStatus} user={user} loading={loading}/>
+            </div>
         </header>
     );
 }

@@ -1,4 +1,4 @@
-import { UserProvider } from './components/contexts/UserContext';
+import { UserProvider } from '@/contexts/UserContext';
 import AppRoutes from './AppRoutes';
 
 function App() {

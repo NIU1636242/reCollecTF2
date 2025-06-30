@@ -1,6 +1,6 @@
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 import { useState } from "react";
-import { SearchContext } from "../../components/contexts/SearchContext";
+import { SearchContext } from '@/contexts/SearchContext';
 import SearchResults from "../../components/search/result/SearchResults";
 import SearchStep from "../../components/search/general/SearchStep";
 
@@ -74,28 +74,29 @@ function SearchPage() {
             categorySelected, setCategorySelected
         }}>
         {isIntro ? (
-            <div className="search-page">
-                <h1 className="text-5xl mb-4">Search in CollecTF</h1>
-                <h2>How does it work?</h2>
-                <ul>
-                    <li className="text-left">STEP 1 - Select a Transcription Factor Family or Instance</li>
-                    <li className="text-left">STEP 2 - Select a taxonomic unit (species)</li>
-                    <li className="text-left">STEP 3 - Select a set of experimental techniques that should back the reported sites.</li>
-                    <li className="text-left">RESULT - Individual (TF/species) and/or ensemble (multiTF/species) reports.</li>
-                </ul>
-                <button className="btn" onClick={startSearch}>START SEARCHING</button>
-                <button className="btn" onClick={() => navigate('/')}>Back to HOME</button>
+        <div className="flex flex-col items-center justify-center text-center p-8 space-y-6">
+            <h1 className="text-4xl font-bold">COLLECTF'S SEARCH METHOD</h1>
+            <h2 className="text-2xl font-semibold">How does it work?</h2>
+            <ul className="text-lg list-disc text-left space-y-2 mt-4">
+            <li>STEP 1 – Select one or more <strong>Transcription Factors</strong>.</li>
+            <li>STEP 2 – Select one or more <strong>Species</strong>.</li>
+            <li>STEP 3 – Select a set of <strong>Experimental Techniques</strong> that should back the reported sites.</li>
+            <li>RESULT – Data for the <strong>Reported Sites</strong> matching the search parameters.</li>
+            </ul>
+            <div className="flex gap-4 mt-6">
+            <button className="btn px-6 py-2 text-lg " onClick={startSearch}>START SEARCH</button>
             </div>
-            ) : step === "1" ? (
-            <SearchStep />
-            ) : step === "2" ? (
-            <SearchStep />
-            ) : step === "3" ? (
-            <SearchStep />
-            ) : step === "4" ? (
-            <SearchResults />
-            ) : (
-            <p>Invalid step</p>
+        </div>
+        ) : step === "1" ? (
+        <SearchStep />
+        ) : step === "2" ? (
+        <SearchStep />
+        ) : step === "3" ? (
+        <SearchStep />
+        ) : step === "4" ? (
+        <SearchResults />
+        ) : (
+        <h1 className="text-center text-2xl font-bold text-red-500">Invalid step</h1>
         )}
         </SearchContext.Provider>
     );

@@ -1,9 +1,7 @@
-import BackSearchButton from "./BackSearchButton";
-import NextSearchButton from "./NextSearchButton";
-import FinishSearchButton from "./FinishSearchButton";
 import SearchParams from "./SearchParams";
 import { useParams } from "react-router-dom";
-import { useSearch } from "../../contexts/SearchContext";
+import { useSearch } from '@/contexts/SearchContext';
+import SearchProgressBar from "@/components/search/general/SearchProgressBar";
 
 function SearchStep() {
 
@@ -14,15 +12,13 @@ function SearchStep() {
 
     return (
         <>
-            <BackSearchButton />
-            {(searchStep === 3) ? <FinishSearchButton selectedData={setSelectedData}/>             
-            :
-            <NextSearchButton />
-            }
-
+            <div className="mb-6">
+                <SearchProgressBar step={searchStep} selectedData={selectedData}/>
+            </div>
             <SearchParams 
                 selectedData={selectedData} 
                 setSelectedData={setSelectedData}
+                searchStep={searchStep}
             />
         </>
     );

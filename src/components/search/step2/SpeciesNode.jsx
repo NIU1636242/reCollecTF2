@@ -12,33 +12,32 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
     
     const handleChange = (e) => {
         const isChecked = e.target.checked;
-        const speciesId = node.id;
         const newSpecies = new Map(species);
         const newAllSpecies = new Map(allSpecies);
         const terminalNodes = [];
 
-        const updateChildren = (nodeId, isChecked) => {
-            const currentNode = newSpecies.get(nodeId);
+        const updateChildren = (node, isChecked) => {
+            const currentNode = newSpecies.get(node.id);
             if (!currentNode) return;
 
             const newStatus = isChecked ? 'checked' : 'unchecked';
 
-            newSpecies.set(nodeId, {
+            newSpecies.set(node.id, {
                 ...currentNode,
                 status: newStatus
             });
 
-            newAllSpecies.set(nodeId, {
+            newAllSpecies.set(node.id, {
                 ...currentNode,
                 status: newStatus
             });
 
             if (currentNode.children.length > 0) {
                 currentNode.children.forEach((child) => {
-                    updateChildren(child.id, isChecked);
+                    updateChildren(child, isChecked);
                 });
             } else {
-                terminalNodes.push(nodeId);
+                terminalNodes.push(node);
             }
         };
 
@@ -53,7 +52,7 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
                     } else if (childStatuses.every(status => status === 'unchecked')) {
                         newStatus = 'unchecked';
                     } else {
-                        newStatus = 'intermediate';
+                        newStatus = 'indeterminate';
                     }
 
                     newSpecies.set(parentId, {
@@ -72,18 +71,18 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
         };
 
         // 1. Update children recursively
-        updateChildren(speciesId, isChecked);
+        updateChildren(node, isChecked);
 
         // 2. Update parents upward
-        updateParents(speciesId);        
+        updateParents(node.id);        
 
         // 3. Update selectedData
         setSelectedData((prevState) => {
             const current = new Set(prevState.Species);
             if (isChecked) {
-                terminalNodes.forEach((id) => current.add(id));
+                terminalNodes.forEach((node) => current.add(node));
             } else {
-                terminalNodes.forEach((id) => current.delete(id));
+                terminalNodes.forEach((node) => current.delete(node));
             }
             return {
                 ...prevState,
@@ -108,12 +107,14 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
     }
 
     return (
-        <section className='text-left ml-4'>
-            <ul className="list-none pl-16 ml-32">
+        <section className='text-left'>
+            <ul className="list-none">
                 <li className="my-2.5">
-                    <span onClick={() => toggleNodeOpen(node.id)} className="cursor-pointer select-none">
-                            {species.get(node.id).isOpen ? '▾' : '▸'}
-                    </span>
+                    {species.get(node.id).children.length !== 0 && (
+                        <span onClick={() => toggleNodeOpen(node.id)} className="cursor-pointer select-none">
+                            { species.get(node.id).isOpen  ? '▾' : '▸'}
+                        </span>
+                    )}
                     <label className="inline-flex items-center gap-2">
                         <span>
                             <input
@@ -124,7 +125,7 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
                                 onChange={handleChange}
                                 checked={species.get(node.id).status === 'checked'}
                                 ref= {(el) => {
-                                    if (el) el.indeterminate = species.get(node.id)?.status === 'intermediate';
+                                    if (el) el.indeterminate = species.get(node.id)?.status === 'indeterminate';
                                 }}
                             >
                             </input>
@@ -133,7 +134,7 @@ const SpeciesNode = ({node, species, setSpecies, allSpecies, setAllSpecies, root
                             <strong>{node.name}</strong>
                         </span>
                     </label>
-                     <ul className="list-none pl-16 ml-32">
+                     <ul className="list-none pl-1 ml-7">
                         {species.get(node.id).isOpen && species.get(node.id).children.map((child) => {
                             return (
                                 <SpeciesNode 
