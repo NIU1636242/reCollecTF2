@@ -24,7 +24,7 @@ const ModalWarning = ({ tfValid, speciesValid, techniquesValid, emptyResult}) =>
                             (emptyResult) &&
                             `No results found for your search.`
                         }
-                        <h3 className="mt-4 text-lg">Please, modify your search.</h3>
+                        <p className="mt-4 text-lg">Please, modify your search.</p>
                     </h2>
                 </div>
                 {(!tfValid || emptyResult) && <div className="flex justify-center items-center"><button className="btn items-center mt-5" onClick={() => navigate('/Search/1')}>Modify</button></div>}
