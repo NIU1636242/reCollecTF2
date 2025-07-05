@@ -34,7 +34,7 @@ function SearchResults() {
 
         if (newTfValid && newSpeciesValid && newTechniquesValid) {
             let initResults = new Map()
-            getSearchResults(selectedData.TF, selectedData.Species, selectedData.Techniques, andOrTuple).then((res => {
+            getSearchResults(selectedData.TF, selectedData.Species).then((res => {
                 if (res.length === 0) {
                     setLoading(false);
                     setModalData({
@@ -45,6 +45,26 @@ function SearchResults() {
                     });
                     setModalIsOpen(true);
                     return;
+                }
+
+                const technqiuesSelected = selectedData.Techniques;
+                const firstConditionFilter = [];
+                const secondConditionFilter = [];
+                const thirdConditionFilter = [];
+
+                if(technqiuesSelected.length > 0) {
+                    technqiuesSelected.forEach(obj => {
+                        const [searchNumber, categoryId, techniqueId] = obj.id.split('-');
+                        if (searchNumber === '0') {
+                            firstConditionFilter.push(techniqueId)
+                        }
+                        else if (searchNumber === '1') {
+                            secondConditionFilter.push(techniqueId)
+                        }
+                        else if (searchNumber === '2') {
+                            thirdConditionFilter.push(techniqueId)
+                        }
+                    })
                 }
                 
                 res.forEach(row => {
@@ -61,7 +81,7 @@ function SearchResults() {
 
                     //2: Unique instance for each table row from each result
 
-                    let dataKey = `${row.TF_name}-${row.uniprot_accession}-${row.TF_species}-${row.annotated_seq}`
+                    let dataKey = `${row.TF_name}-${row.uniprot_accession}-${row.TF_species}-${row.annotated_seq}-${row.curation_id}`
                     const tableData = initResults.get(key).table_data
 
                     if (!tableData.has(dataKey)) {
@@ -84,9 +104,9 @@ function SearchResults() {
 
                     const currentData = tableData.get(dataKey);
 
-                    const techKey = `${row.tech_name}-${row.EO_term}`;
-                    if (!currentData.techniques.some(t => `${t.tech_name}-${t.EO_term}` === techKey)) {
-                        currentData.techniques.push({ tech_name: row.tech_name, EO_term: row.EO_term });
+                    const techKey = `${row.technique_id}`;
+                    if (!currentData.techniques.some(t => `${t.technique_id}` === techKey)) {
+                        currentData.techniques.push({ technique_id: row.technique_id, tech_name: row.tech_name, EO_term: row.EO_term });
                     }
 
                     const geneKey = `${row.gene_name}-${row.locus_tag}`;
@@ -96,6 +116,64 @@ function SearchResults() {
                 
                 });
 
+                //4: Filter the results based on the selected techniques
+                console.log("First condition filter: ", firstConditionFilter);
+                console.log("Second condition filter: ", secondConditionFilter);
+                console.log("Third condition filter: ", thirdConditionFilter);
+                console.log("And/Or tuple: ", andOrTuple);
+                console.log("Initial results before filtering: ", initResults);
+                
+                if (firstConditionFilter.length > 0 || secondConditionFilter.length > 0 || thirdConditionFilter.length > 0) {
+                    const keysToDelete = [];
+
+                    initResults.forEach((value, key) => {
+                        value.table_data.forEach((rowData, rowKey) => {
+                            const hasFirst = rowData.techniques.some(tech => firstConditionFilter.includes(`${tech.technique_id}`));
+                            const hasSecond = rowData.techniques.some(tech => secondConditionFilter.includes(`${tech.technique_id}`));
+                            const hasThird = rowData.techniques.some(tech => thirdConditionFilter.includes(`${tech.technique_id}`));
+
+                            let keep = false;
+
+                            if (firstConditionFilter.length > 0) {
+                                if (andOrTuple[0]) { // AND
+                                    keep = hasFirst;
+                                } else { // OR
+                                    if (hasFirst) {
+                                        keep = true;
+                                    } else if (secondConditionFilter.length > 0) {
+                                        if (andOrTuple[1]) { // AND
+                                            keep = hasSecond;
+                                        } else { // OR
+                                            keep = hasSecond || hasThird;
+                                        }
+                                    } else {
+                                        keep = hasThird;
+                                    }
+                                }
+                            } else if (secondConditionFilter.length > 0) {
+                                if (andOrTuple[1]) { // AND
+                                    keep = hasSecond;
+                                } else { // OR
+                                    keep = hasSecond || hasThird;
+                                }
+                            } else if (thirdConditionFilter.length > 0) {
+                                keep = hasThird;
+                            }
+
+                            if (!keep) {
+                                value.table_data.delete(rowKey);
+                            }
+                        });
+
+                        if (value.table_data.size === 0) {
+                            keysToDelete.push(key);
+                        }
+                    });
+
+                    keysToDelete.forEach(key => initResults.delete(key));
+                }
+                
+                //5: Sort the results by TF_name and TF_species
                 const sortedResults = new Map(
                     Array.from(initResults.entries()).sort(([, valA], [, valB]) => {
                         const nameA = valA.TF_name.toLowerCase();

@@ -94,7 +94,7 @@ export async function getExpTechniques() {
 
 const placeholders = (arr) => arr.map(() => '?').join(',');
 
-export async function getSearchResults(tfs, species, expTechniques, andOrTuple) {
+export async function getSearchResults(tfs, species) {
     const conditions = [];
     const values = [];
 
@@ -111,53 +111,12 @@ export async function getSearchResults(tfs, species, expTechniques, andOrTuple) 
         values.push(...speciesIds);
     }
 
-    const firstConnector = andOrTuple[0] ? 'AND' : 'OR'
-    const secondConnector = andOrTuple[1] ? 'AND' : 'OR'
-    const firstCondition = []
-    const secondCondition = []
-    const thirdCondition = []
-    const conditionFragments = []
-
-    if (expTechniques.length > 0) {
-        expTechniques.forEach(obj => {
-            const [searchNumber, categoryId, techniqueId] = obj.id.split('-');
-            if (searchNumber === '0') {
-                firstCondition.push(techniqueId)
-            }
-            else if (searchNumber === '1') {
-                secondCondition.push(techniqueId)
-            }
-            else if (searchNumber === '2') {
-                thirdCondition.push(techniqueId)
-            }
-        })
-
-        if (firstCondition.length > 0) {
-            conditionFragments.push(`(ET.technique_id IN (${placeholders(firstCondition)})`);
-            values.push(...firstCondition);
-        }
-        if (secondCondition.length > 0) {
-            const connector = conditionFragments.length > 0 ? firstConnector : '(';
-            conditionFragments.push(`${connector} ET.technique_id IN (${placeholders(secondCondition)})`);
-            values.push(...secondCondition);
-        }
-        if (thirdCondition.length > 0) {
-            const connector = conditionFragments.length > 0 ? secondConnector : '(';
-            conditionFragments.push(`${connector} ET.technique_id IN (${placeholders(thirdCondition)})`);
-            values.push(...thirdCondition);
-        }
-
-        if (conditionFragments.length > 0) {
-            conditions.push(conditionFragments.join(' ') + ')');
-        }
-    }
-
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     
     const query = `
         SELECT
             TF.name AS TF_name, TFI.uniprot_accession, CUR.TF_species, CUR.curation_id, PUB.publication_type, PUB.pmid, 
-            CURSI.annotated_seq, CURSI.TF_type, ET.name AS tech_name, ET.EO_term, SI.start, SI.end, SI.strand, 
+            CURSI.annotated_seq, CURSI.TF_type, ET.name AS tech_name, ET.technique_id, ET.EO_term, SI.start, SI.end, SI.strand, 
             GENOME.genome_accession, GENE.name AS gene_name, GENE.locus_tag
         FROM 
             core_tf TF
@@ -177,5 +136,7 @@ export async function getSearchResults(tfs, species, expTechniques, andOrTuple) 
     `;
 
     console.log("Executing query:", query);
+    console.log("VALUES: ", values);
+    
     return runQuery(query, values);
 }
