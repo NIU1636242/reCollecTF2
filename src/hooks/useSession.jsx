@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-const vercelUrl = 'https://collectf.vercel.app' // to be changed in prod 'https://collectf.vercel.app' 'http://localhost:3000'
+const vercelUrl = 'https://recollectf.vercel.app' // to be changed in dev 'http://localhost:3000'
 
 export function useSession() {
   const [user, setUser] = useState(null);
