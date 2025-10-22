@@ -13,7 +13,6 @@ export default function Step2GenomeTF() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false); //controla si ja s’ha fet una cerca
 
-  // 🔹 Carrega les famílies disponibles en iniciar
   useEffect(() => {
     async function fetchFamilies() {
       try {
