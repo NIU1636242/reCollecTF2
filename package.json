@@ -11,9 +11,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "@octokit/rest": "^22.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.0",
+    "sql.js": "^1.13.0",
     "sql.js-httpvfs": "^0.8.12"
   },
   "devDependencies": {
