@@ -1,85 +1,63 @@
-// /api/mutate.js
+// /api/mutate.js — Commiteja un patch .sql (no toca el .db)
 import { Octokit } from "@octokit/rest";
-import initSqlJs from "sql.js";
-import zlib from "zlib";
 
-//Seguridad: solo se permiten queries que modifiquen la BD
-const isMutation = (sql = "") =>
+// petita whitelist (seguretat bàsica)
+const isAllowed = (sql = "") =>
   /^\s*(insert|update|delete|replace|create|alter|drop)\b/i.test(sql);
 
 export default async function handler(req, res) {
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Method not allowed" });
-
-  const { sql, params = [] } = req.body || {};
-  if (!sql || !isMutation(sql))
-    return res.status(400).json({ error: "Only mutation SQL allowed" });
-
-  //Variables de entorno (configuradas en Vercel)
-  const {
-    GH_TOKEN,
-    GH_OWNER,
-    GH_REPO,
-    DB_PATH = "public/CollecTF.db.gz",
-    BRANCH = "main",
-    WORKFLOW_FILE = ".github/workflows/update-db.yml",
-  } = process.env;
-
-  if (!GH_TOKEN || !GH_OWNER || !GH_REPO) {
-    return res
-      .status(500)
-      .json({ error: "Missing GitHub env vars (GH_TOKEN, GH_OWNER, GH_REPO)" });
-  }
-
-  const octokit = new Octokit({ auth: GH_TOKEN });
-
   try {
-    //Descargar el .gz del repositorio
-    const { data: file } = await octokit.repos.getContent({
-      owner: GH_OWNER,
-      repo: GH_REPO,
-      path: DB_PATH,
-      ref: BRANCH,
-    });
+    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-    if (!("content" in file))
-      throw new Error("DB file not found or not a file");
+    const { sql, params = [] } = req.body || {};
+    if (!sql || !isAllowed(sql)) return res.status(400).json({ error: "Only mutation SQL allowed" });
 
-    //Descomprimir (de base64 → gzip → bytes SQLite)
-    const compressedBuffer = Buffer.from(file.content, "base64");
-    const dbBuffer = zlib.gunzipSync(compressedBuffer);
-    const dbBytes = new Uint8Array(dbBuffer);
+    // substitució simple de paràmetres ? -> valors escapats
+    const esc = v =>
+      typeof v === "number" ? String(v)
+      : `'${String(v).replace(/'/g, "''")}'`;
+    let finalSql = sql;
+    for (const p of params) finalSql = finalSql.replace(/\?/, esc(p));
 
-    //Abrir DB en memoria y ejecutar la mutación
-    const SQL = await initSqlJs();
-    const db = new SQL.Database(dbBytes);
+    const {
+      GH_TOKEN, GH_OWNER, GH_REPO,
+      BRANCH = "main",
+      PATCH_DIR = "patches", //carpeta on desarem els .sql
+      WORKFLOW_FILE = ".github/workflows/update-db.yml",
+    } = process.env;
 
-    const stmt = db.prepare(sql);
-    stmt.bind(params);
-    while (stmt.step()) {} // Ejecuta todas las filas afectadas
-    stmt.free();
+    if (!GH_TOKEN || !GH_OWNER || !GH_REPO)
+      return res.status(500).json({ error: "Missing GH env vars" });
 
-    //Exportar DB → comprimir → codificar base64
-    const updatedBytes = db.export();
-    const updatedGz = zlib.gzipSync(Buffer.from(updatedBytes));
-    const updatedBase64 = updatedGz.toString("base64");
+    const octokit = new Octokit({ auth: GH_TOKEN });
 
-    //Subir el nuevo .gz al repo
+    // nom únic per al patch
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const path = `${PATCH_DIR}/${ts}.sql`;
+    const content = Buffer.from(finalSql + "\n").toString("base64");
+
+    // crea el fitxer .sql amb la mutació
     await octokit.repos.createOrUpdateFileContents({
       owner: GH_OWNER,
       repo: GH_REPO,
-      path: DB_PATH,
-      message: `chore(db): apply mutation via API\n\nSQL:\n${sql}\nParams:\n${JSON.stringify(
-        params
-      )}`,
-      content: updatedBase64,
+      path,
+      message: `chore(db): add SQL patch ${ts}`,
+      content,
       branch: BRANCH,
-      sha: file.sha,
     });
 
-    return res.status(200).json({ ok: true });
+    // dispara el workflow perquè apliqui el patch i regeneri el .gz
+    await octokit.actions.createWorkflowDispatch({
+      owner: GH_OWNER,
+      repo: GH_REPO,
+      workflow_id: WORKFLOW_FILE,
+      ref: BRANCH,
+      inputs: { reason: "apply-sql-patches" }
+    });
+
+    return res.status(200).json({ ok: true, patch: path });
   } catch (err) {
-    console.error("Mutate error:", err);
+    console.error("mutate error:", err);
     return res.status(500).json({ error: err.message });
   }
 }
