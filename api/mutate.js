@@ -1,33 +1,40 @@
 // /api/mutate.js
 import { Octokit } from "@octokit/rest";
 import initSqlJs from "sql.js";
+import zlib from "zlib";
 
-// seguridad básica: solo permitimos sentencias que modifican (no SELECT)
-const isMutation = (sql = "") => /^\s*(insert|update|delete|replace|create|alter|drop)\b/i.test(sql);
+//Seguridad: solo se permiten queries que modifiquen la BD
+const isMutation = (sql = "") =>
+  /^\s*(insert|update|delete|replace|create|alter|drop)\b/i.test(sql);
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
   const { sql, params = [] } = req.body || {};
-  if (!sql || !isMutation(sql)) return res.status(400).json({ error: "Only mutation SQL allowed" });
+  if (!sql || !isMutation(sql))
+    return res.status(400).json({ error: "Only mutation SQL allowed" });
 
+  //Variables de entorno (configuradas en Vercel)
   const {
     GH_TOKEN,
     GH_OWNER,
     GH_REPO,
-    DB_PATH = "data/CollecTF.db",
+    DB_PATH = "public/CollecTF.db.gz",
     BRANCH = "main",
     WORKFLOW_FILE = ".github/workflows/update-db.yml",
   } = process.env;
 
   if (!GH_TOKEN || !GH_OWNER || !GH_REPO) {
-    return res.status(500).json({ error: "Missing GitHub env vars (GH_TOKEN, GH_OWNER, GH_REPO)" });
+    return res
+      .status(500)
+      .json({ error: "Missing GitHub env vars (GH_TOKEN, GH_OWNER, GH_REPO)" });
   }
 
   const octokit = new Octokit({ auth: GH_TOKEN });
 
   try {
-    // 1) Descargar el .db actual del repo (contenido base64)
+    //Descargar el .gz del repositorio
     const { data: file } = await octokit.repos.getContent({
       owner: GH_OWNER,
       repo: GH_REPO,
@@ -35,48 +42,44 @@ export default async function handler(req, res) {
       ref: BRANCH,
     });
 
-    if (!("content" in file)) throw new Error("DB file not found or not a file");
-    const dbBytes = Uint8Array.from(Buffer.from(file.content, "base64"));
+    if (!("content" in file))
+      throw new Error("DB file not found or not a file");
 
-    // 2) Abrir DB en memoria con sql.js (WASM)
+    //Descomprimir (de base64 → gzip → bytes SQLite)
+    const compressedBuffer = Buffer.from(file.content, "base64");
+    const dbBuffer = zlib.gunzipSync(compressedBuffer);
+    const dbBytes = new Uint8Array(dbBuffer);
+
+    //Abrir DB en memoria y ejecutar la mutación
     const SQL = await initSqlJs();
     const db = new SQL.Database(dbBytes);
 
-    // 3) Ejecutar la mutación con parámetros
-    //    Usamos prepared statement para bind seguro
     const stmt = db.prepare(sql);
     stmt.bind(params);
-    while (stmt.step()) {} // por si afectara varias filas
+    while (stmt.step()) {} // Ejecuta todas las filas afectadas
     stmt.free();
 
-    // 4) Exportar DB (bytes) y subirla con un commit
+    //Exportar DB → comprimir → codificar base64
     const updatedBytes = db.export();
-    const updatedBase64 = Buffer.from(updatedBytes).toString("base64");
+    const updatedGz = zlib.gzipSync(Buffer.from(updatedBytes));
+    const updatedBase64 = updatedGz.toString("base64");
 
+    //Subir el nuevo .gz al repo
     await octokit.repos.createOrUpdateFileContents({
       owner: GH_OWNER,
       repo: GH_REPO,
       path: DB_PATH,
-      message: `chore(db): apply mutation via API\n\nSQL:\n${sql}\nParams:\n${JSON.stringify(params)}`,
+      message: `chore(db): apply mutation via API\n\nSQL:\n${sql}\nParams:\n${JSON.stringify(
+        params
+      )}`,
       content: updatedBase64,
       branch: BRANCH,
-      sha: file.sha, // necesario para actualizar
-    });
-
-    // 5) (Opcional) Disparar workflow para regenerar public/CollecTF.db.gz
-    await octokit.actions.createWorkflowDispatch({
-      owner: GH_OWNER,
-      repo: GH_REPO,
-      workflow_id: WORKFLOW_FILE, // ruta al yml
-      ref: BRANCH,
-      inputs: {
-        reason: "db-updated",
-      },
+      sha: file.sha,
     });
 
     return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error("mutate error:", err);
+    console.error("Mutate error:", err);
     return res.status(500).json({ error: err.message });
   }
 }
