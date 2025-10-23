@@ -1,23 +1,29 @@
 import { createDbWorker } from "sql.js-httpvfs";
 
-const workerUrl = new URL("sql.js-httpvfs/dist/sqlite.worker.js", import.meta.url).toString();
-const wasmUrl   = new URL("sql.js-httpvfs/dist/sql-wasm.wasm",   import.meta.url).toString();
+const FILE_LENGTH = 71716864;
 
-
-export const dbWorkerPromise = createDbWorker(
-  [
-    {
-      from: "inline",
-      config: {
-        serverMode: "full",
-        url: "/CollecTF.db.gz",
-        requestChunkSize: 4096,  // fewer, larger requests
-        fileLength: 71716864,
-      },
+export async function initDatabase() {
+  const config = {
+    from: "jsonconfig",
+    config: {
+      serverMode: "full",
+      requestChunkSize: 4096,
+      databaseUrl: "/CollecTF.db.gz",
+      fileLength: FILE_LENGTH,
+      gzip: true,
     },
-  ],
-  workerUrl,
-  wasmUrl,
-  10 * 1024 * 1024
-);
+  };
+
+  console.log("constructing url database", config.config.databaseUrl);
+  const workerUrl = new URL("/sqlite.worker.js", window.location.href).toString();
+  const wasmUrl = new URL("/sql-wasm.wasm", window.location.href).toString();
+
+  const worker = await createDbWorker(
+    [config],
+    workerUrl,
+    wasmUrl
+  );
+
+  return worker;
+}
 
