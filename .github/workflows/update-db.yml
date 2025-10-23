@@ -8,7 +8,7 @@ on:
         type: string
   push:
     paths:
-      - 'patches/*.sql'        # també s'executa si pujes un .sql directament
+      - 'patches/*.sql'        # També s'executa si es puja un .sql directament
 
 jobs:
   apply-patches:
@@ -23,37 +23,60 @@ jobs:
       - name: Install sqlite3 and gzip
         run: |
           sudo apt-get update
-          sudo apt-get install -y sqlite3 gzip
+          sudo apt-get install -y sqlite3 gzip file
 
-      - name: Ensure DB exists
+      - name: Ensure DB exists (handle gzip or raw .db)
         run: |
+          set -e
           if [ ! -f public/CollecTF.db ]; then
-            # si només tens .gz al repo, descomprimeix-lo una vegada
             if [ -f public/CollecTF.db.gz ]; then
-              gunzip -c public/CollecTF.db.gz > public/CollecTF.db
+              echo "Checking if CollecTF.db.gz is a real gzip..."
+              if file public/CollecTF.db.gz | grep -q 'gzip compressed'; then
+                echo "Detected gzip → decompressing..."
+                gunzip -c public/CollecTF.db.gz > public/CollecTF.db
+              else
+                echo "Not a gzip → copying as raw SQLite..."
+                cp public/CollecTF.db.gz public/CollecTF.db
+              fi
             else
-              echo "ERROR: no DB found (public/CollecTF.db or .gz)"; exit 1
+              echo "ERROR: no database found (public/CollecTF.db or .gz)"
+              exit 1
             fi
           fi
+
+          echo "DB ready → verifying header:"
+          head -c 16 public/CollecTF.db | od -An -tx1
 
       - name: Apply SQL patches
         run: |
           shopt -s nullglob
           for f in patches/*.sql; do
-            echo "Applying $f"
+            echo "Applying patch: $f"
             sqlite3 public/CollecTF.db < "$f"
             rm "$f"
           done
 
-      - name: Rebuild GZ
+      - name: Rebuild GZ (always create valid gzip)
         run: |
+          echo "Recompressing to valid gzip..."
           gzip -c public/CollecTF.db > public/CollecTF.db.gz
+          echo "New gzip size:"
+          stat -c%s public/CollecTF.db.gz || stat -f%z public/CollecTF.db.gz
 
       - name: Commit changes
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add public/CollecTF.db public/CollecTF.db.gz || true
           git add -A patches || true
-          git commit -m "build(db): apply patches and rebuild gz" || echo "nothing to commit"
-          git push
+
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(db): apply SQL patches & rebuild valid gzip"
+            git push
+            echo "Database updated and committed"
+          else
+            echo "No changes to commit."
+          fi
