@@ -7,7 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-CollecTF.db
+#CollecTF.db
 serverless-functions
 node_modules
 dist
