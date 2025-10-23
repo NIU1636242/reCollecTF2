@@ -75,8 +75,13 @@ jobs:
 
           if ! git diff --cached --quiet; then
             git commit -m "chore(db): apply SQL patches & rebuild valid gzip"
-            git push
-            echo "Database updated and committed"
+
+            echo "Pulling latest changes before push..."
+            git pull --rebase origin main || echo "Nothing to rebase."
+
+            git push origin main
+            echo "Database updated and committed successfully"
           else
             echo "No changes to commit."
           fi
+
