@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
+import { dispatchWorkflow } from "../../utils/serverless";
 
 export default function Step2GenomeTF() {
   const [tfName, setTfName] = useState("");
@@ -11,7 +12,7 @@ export default function Step2GenomeTF() {
   const [tfDesc, setTfDesc] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false); //controla si ja s’ha fet una cerca
+  const [searched, setSearched] = useState(false);
 
   useEffect(() => {
     async function fetchFamilies() {
@@ -29,7 +30,6 @@ export default function Step2GenomeTF() {
     fetchFamilies();
   }, []);
 
-  // 🔹 Buscar TF existent
   async function handleSearchTF() {
     setMsg("");
     setTfRow(null);
@@ -70,24 +70,10 @@ export default function Step2GenomeTF() {
     }
   }
 
-  // 🔹 Crear una família si no existeix i retornar el seu ID
-  async function ensureFamilyId() {
-    if (selectedFamily && selectedFamily !== "new") {
-      return selectedFamily;
-    }
-    if (!newFamilyName.trim()) {
-      throw new Error("Has d’indicar un nom per a la nova família.");
-    }
-
-    await runQuery(
-      `INSERT INTO core_tffamily (name, description) VALUES (?, ?)`,
-      [newFamilyName.trim(), newFamilyDesc.trim()]
-    );
-    const idRow = await runQuery(`SELECT last_insert_rowid() AS id`);
-    return idRow[0].id;
+  function esc(str) {
+    return String(str || "").replace(/'/g, "''");
   }
 
-  // 🔹 Crear un nou TF
   async function handleCreateTF() {
     setMsg("");
     const name = tfName.trim();
@@ -98,29 +84,47 @@ export default function Step2GenomeTF() {
 
     setLoading(true);
     try {
-      const famId = await ensureFamilyId();
+      const queries = [];
 
-      await runQuery(
-        `INSERT INTO core_tf (name, family_id, description) VALUES (?, ?, ?)`,
-        [name, famId, tfDesc.trim()]
+      if (selectedFamily === "new") {
+        if (!newFamilyName.trim()) {
+          throw new Error("Has d’indicar un nom per a la nova família.");
+        }
+
+        // crear nova família
+        queries.push(
+          `INSERT INTO core_tffamily (name, description)
+           VALUES ('${esc(newFamilyName)}', '${esc(newFamilyDesc)}');`
+        );
+
+        // crear TF associat a la família
+        queries.push(
+          `INSERT INTO core_tf (name, family_id, description)
+           VALUES (
+             '${esc(name)}',
+             (SELECT tf_family_id FROM core_tffamily WHERE name='${esc(newFamilyName)}'),
+             '${esc(tfDesc)}'
+           );`
+        );
+      } else {
+        const famId = Number(selectedFamily);
+        if (!famId) throw new Error("Selecciona una família vàlida o crea’n una de nova.");
+
+        queries.push(
+          `INSERT INTO core_tf (name, family_id, description)
+           VALUES ('${esc(name)}', ${famId}, '${esc(tfDesc)}');`
+        );
+      }
+
+      await dispatchWorkflow({ queries });
+
+      setMsg(
+        "Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy."
       );
-
-      const newTF = await runQuery(
-        `
-        SELECT tf.*, fam.name AS family_name 
-        FROM core_tf tf 
-        LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id 
-        WHERE lower(tf.name)=lower(?) 
-        LIMIT 1
-        `,
-        [name]
-      );
-
-      setTfRow(newTF[0]);
-      setMsg("TF creat correctament.");
+      setTfRow(null);
     } catch (e) {
       console.error(e);
-      setMsg("Error creant el TF o la família.");
+      setMsg(`Error enviant les consultes: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -130,7 +134,6 @@ export default function Step2GenomeTF() {
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Step 2 – Genome & TF</h2>
 
-      {/* Buscar TF */}
       <div className="space-y-2">
         <label className="block font-medium">Nom del TF</label>
         <div className="flex gap-2">
@@ -144,15 +147,10 @@ export default function Step2GenomeTF() {
             {loading ? "Cercant..." : "Buscar"}
           </button>
         </div>
-        <p className="text-sm text-gray-400">
-          Escriu el nom del factor de transcripció i prem <strong>Buscar</strong>.
-        </p>
       </div>
 
-      {/* Missatge d’estat */}
       {msg && <p className="text-sm text-blue-300">{msg}</p>}
 
-      {/* TF trobat */}
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
@@ -162,12 +160,10 @@ export default function Step2GenomeTF() {
         </div>
       )}
 
-      {/* Si no existeix TF (només després de buscar) */}
       {!tfRow && searched && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Crear un nou TF</h3>
 
-          {/* Selector de família */}
           <div>
             <label className="block font-medium">Família existent</label>
             <select
@@ -185,7 +181,6 @@ export default function Step2GenomeTF() {
             </select>
           </div>
 
-          {/* Camps de nova família */}
           {selectedFamily === "new" && (
             <>
               <div>
@@ -209,7 +204,6 @@ export default function Step2GenomeTF() {
             </>
           )}
 
-          {/* Descripció TF */}
           <div>
             <label className="block font-medium">Descripció del TF</label>
             <textarea

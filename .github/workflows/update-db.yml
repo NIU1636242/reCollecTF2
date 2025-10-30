@@ -1,59 +1,62 @@
-name: Update DB and Rebuild GZ
+name: Update DB
 
 on:
   workflow_dispatch:
     inputs:
-      reason:
+      queries:
+        description: 'Write SQL queries'
         required: false
-        type: string
-  push:
-    paths:
-      - 'patches/*.sql'        # també s'executa si pujes un .sql directament
+        default: 'false'
 
 jobs:
-  apply-patches:
+  update:
+    name: Update
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          lfs: false
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        
+      - name: Install SQLite
+        if: ${{github.event.inputs.queries != 'false'}}
+        run: sudo apt-get install sqlite3 
 
-      - name: Install sqlite3 and gzip
+      - name: Create SQL queries file ans activate FK
+        if: ${{github.event.inputs.queries != 'false'}}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y sqlite3 gzip
+          echo "PRAGMA foreign_keys = ON;" > queries.sql
+          echo "${{ github.event.inputs.queries }}" | base64 -d > queries.json
+          jq -r '.[]' queries.json >> queries.sql
+          cat queries.sql
 
-      - name: Ensure DB exists
+      - name: Run SQL queries
+        if: ${{github.event.inputs.queries != 'false'}}
         run: |
-          if [ ! -f public/CollecTF.db ]; then
-            # si només tens .gz al repo, descomprimeix-lo una vegada
-            if [ -f public/CollecTF.db.gz ]; then
-              gunzip -c public/CollecTF.db.gz > public/CollecTF.db
-            else
-              echo "ERROR: no DB found (public/CollecTF.db or .gz)"; exit 1
-            fi
+          set -e
+          sqlite3 ./public/CollecTF.db.gz < queries.sql
+
+      - name: Delete SQL queries file
+        if: ${{github.event.inputs.queries != 'false'}}
+        run: rm queries.sql && rm queries.json
+
+      - name: Commit updated database
+        if: ${{ github.event.inputs.queries != 'false' }}
+        env: 
+          TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add ./public/CollecTF.db.gz
+          if ! git diff --cached --quiet; then
+            git commit -m "Update database via workflow_dispatch"
+            git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
+            git push origin main
+            echo "${{ github.repository }}"
+            curl -X POST \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches \
+            -d '{"ref":"main"}'
+          else
+            echo "No changes to commit."
           fi
-
-      - name: Apply SQL patches
-        run: |
-          shopt -s nullglob
-          for f in patches/*.sql; do
-            echo "Applying $f"
-            sqlite3 public/CollecTF.db < "$f"
-            rm "$f"
-          done
-
-      - name: Rebuild GZ
-        run: |
-          gzip -c public/CollecTF.db > public/CollecTF.db.gz
-
-      - name: Commit changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/CollecTF.db public/CollecTF.db.gz || true
-          git add -A patches || true
-          git commit -m "build(db): apply patches and rebuild gz" || echo "nothing to commit"
-          git push
