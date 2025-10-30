@@ -20,7 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const owner = "NIU1636242";
     const repo = "reCollecTF2";
     const workflow_id = "update-db.yml";
-    const token = process.env.GITHUB_TOKEN || process.env.BOT_TOKEN;
+    const token = process.env.GH_TOKEN;
 
     if (!token) {
       throw new Error("Missing GitHub token in environment variables.");
