@@ -4,8 +4,6 @@
 
 import { runQuery } from "../queryExecutor";
 
-
-
 export async function testQuery() {
     return runQuery("SELECT 1");
 }
