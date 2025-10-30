@@ -13,6 +13,7 @@
   "dependencies": {
     "@libsql/client": "^0.15.15",
     "@octokit/rest": "^22.0.0",
+    "@vercel/node": "^5.5.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.0",
