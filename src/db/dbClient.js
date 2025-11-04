@@ -11,7 +11,7 @@ export const dbWorkerPromise = createDbWorker(
       config: {
         serverMode: "full",
         url: "/CollecTF.db.gz",
-        requestChunkSize: 4096,  // fewer, larger requests
+        requestChunkSize: 4096,
         fileLength: 71716864,
       },
     },
