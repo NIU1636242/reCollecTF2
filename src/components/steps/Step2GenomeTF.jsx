@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react"; //Per a carregar la llista de families existents
-import { runQuery } from "../../db/queryExecutor"; //Per a fer consultes a la DB
-import { dispatchWorkflow } from "../../utils/serverless"; //Queries per a actualitzar la DB
+import { useState, useEffect } from "react";
+import { runQuery } from "../../db/queryExecutor";
+import { dispatchWorkflow } from "../../utils/serverless";
 
-export default function Step2GenomeTF() { //Definim el comportament del Step2
+export default function Step2GenomeTF() {
   const [tfName, setTfName] = useState("");
   const [tfRow, setTfRow] = useState(null);
   const [families, setFamilies] = useState([]);
@@ -12,23 +12,34 @@ export default function Step2GenomeTF() { //Definim el comportament del Step2
   const [tfDesc, setTfDesc] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
 
-  useEffect(() => { //
-    runQuery(`
-      SELECT tf_family_id, name
-      FROM core_tffamily
-      ORDER BY name ASC
-    `)
-      .then(setFamilies)
-      .catch((e) => console.error("Error carregant famílies:", e));
+  useEffect(() => {
+    async function fetchFamilies() {
+      try {
+        const rows = await runQuery(`
+          SELECT tf_family_id, name
+          FROM core_tffamily
+          ORDER BY name ASC
+        `);
+        setFamilies(rows);
+      } catch (e) {
+        console.error("Error carregant famílies:", e);
+      }
+    }
+    fetchFamilies();
   }, []);
 
   async function handleSearchTF() {
     setMsg("");
     setTfRow(null);
+    setSearched(false);
 
     const name = tfName.trim();
-    if (!name) return setMsg("Introdueix un nom per buscar.");
+    if (!name) {
+      setMsg("Introdueix un nom per buscar.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -38,42 +49,62 @@ export default function Step2GenomeTF() { //Definim el comportament del Step2
         FROM core_tf tf
         LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id
         WHERE lower(tf.name) = lower(?)
-        LIMIT 1`,
+        LIMIT 1
+        `,
         [name]
       );
 
-      setTfRow(rows[0] || null);
-      setMsg(rows.length ? "TF trobat a la base de dades." : "TF no trobat. Pots crear-lo a continuació.");
-    } catch {
+      if (rows.length) {
+        setTfRow(rows[0]);
+        setMsg("TF trobat a la base de dades.");
+      } else {
+        setTfRow(null);
+        setMsg("TF no trobat. Pots crear-lo a continuació.");
+      }
+      setSearched(true);
+    } catch (e) {
+      console.error(e);
       setMsg("Error consultant la base de dades.");
     } finally {
       setLoading(false);
     }
   }
 
-  const esc = (s) => String(s || "").replace(/'/g, "''");
+  function esc(str) {
+    return String(str || "").replace(/'/g, "''");
+  }
 
   async function handleCreateTF() {
     setMsg("");
-
     const name = tfName.trim();
-    if (!name) return setMsg("Escriu un nom per al TF.");
+    if (!name) {
+      setMsg("Escriu un nom per al TF.");
+      return;
+    }
 
     setLoading(true);
     try {
       const queries = [];
 
       if (selectedFamily === "new") {
-        if (!newFamilyName.trim()) throw new Error("Has d’indicar un nom per a la nova família.");
+        if (!newFamilyName.trim()) {
+          throw new Error("Has d’indicar un nom per a la nova família.");
+        }
 
+        // crear nova família
         queries.push(
           `INSERT INTO core_tffamily (name, description)
            VALUES ('${esc(newFamilyName)}', '${esc(newFamilyDesc)}');`
         );
 
+        // crear TF associat a la família
         queries.push(
           `INSERT INTO core_tf (name, family_id, description)
-           VALUES ('${esc(name)}', (SELECT tf_family_id FROM core_tffamily WHERE name='${esc(newFamilyName)}'), '${esc(tfDesc)}');`
+           VALUES (
+             '${esc(name)}',
+             (SELECT tf_family_id FROM core_tffamily WHERE name='${esc(newFamilyName)}'),
+             '${esc(tfDesc)}'
+           );`
         );
       } else {
         const famId = Number(selectedFamily);
@@ -86,10 +117,14 @@ export default function Step2GenomeTF() { //Definim el comportament del Step2
       }
 
       await dispatchWorkflow({ queries });
-      setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
+
+      setMsg(
+        "Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy."
+      );
       setTfRow(null);
     } catch (e) {
-      setMsg(`Error enviant les consultes: ${e.message}`);  
+      console.error(e);
+      setMsg(`Error enviant les consultes: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -137,7 +172,7 @@ export default function Step2GenomeTF() { //Definim el comportament del Step2
               onChange={(e) => setSelectedFamily(e.target.value)}
             >
               <option value="">Selecciona una família...</option>
-              <option value="new">+ Nova família</option>
+              <option value="new">➕ Nova família</option>
               {families.map((f) => (
                 <option key={f.tf_family_id} value={f.tf_family_id}>
                   {f.name}
