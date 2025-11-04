@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
-import { runQuery } from "../../db/queryExecutor";
-import { dispatchWorkflow } from "../../utils/serverless";
+import { useState, useEffect } from "react"; //Per a carregar la llista de families existents
+import { runQuery } from "../../db/queryExecutor"; //Per a fer consultes a la DB
+import { dispatchWorkflow } from "../../utils/serverless"; //Queries per a actualitzar la DB
 
-export default function Step2GenomeTF() {
+export default function Step2GenomeTF() { //Definim el comportament del Step2
   const [tfName, setTfName] = useState("");
   const [tfRow, setTfRow] = useState(null);
   const [families, setFamilies] = useState([]);
@@ -13,7 +13,7 @@ export default function Step2GenomeTF() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  useEffect(() => { //
     runQuery(`
       SELECT tf_family_id, name
       FROM core_tffamily
@@ -89,7 +89,7 @@ export default function Step2GenomeTF() {
       setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
       setTfRow(null);
     } catch (e) {
-      setMsg(`Error enviant les consultes: ${e.message}`);
+      setMsg(`Error enviant les consultes: ${e.message}`);  
     } finally {
       setLoading(false);
     }
@@ -137,7 +137,7 @@ export default function Step2GenomeTF() {
               onChange={(e) => setSelectedFamily(e.target.value)}
             >
               <option value="">Selecciona una família...</option>
-              <option value="new">➕ Nova família</option>
+              <option value="new">+ Nova família</option>
               {families.map((f) => (
                 <option key={f.tf_family_id} value={f.tf_family_id}>
                   {f.name}
