@@ -10,8 +10,8 @@ export default function Step2GenomeTF() {
   const [newFamilyName, setNewFamilyName] = useState("");
   const [newFamilyDesc, setNewFamilyDesc] = useState("");
   const [tfDesc, setTfDesc] = useState("");
-  const [msg, setMsg] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState(""); //Missatge per a feedback
+  const [loading, setLoading] = useState(false); //Bloqueja botons mentre fa la busqueda
   const [searched, setSearched] = useState(false);
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export default function Step2GenomeTF() {
           FROM core_tffamily
           ORDER BY name ASC
         `);
-        setFamilies(rows);
+        setFamilies(rows); //Guarda a families la llista llegida de la BD
       } catch (e) {
         console.error("Error carregant famílies:", e);
       }
@@ -43,7 +43,7 @@ export default function Step2GenomeTF() {
 
     setLoading(true);
     try {
-      const rows = await runQuery(
+      const rows = await runQuery( //Busquem el TF i la seva familia si en té
         `
         SELECT tf.*, fam.name AS family_name
         FROM core_tf tf
@@ -66,11 +66,11 @@ export default function Step2GenomeTF() {
       console.error(e);
       setMsg("Error consultant la base de dades.");
     } finally {
-      setLoading(false);
+      setLoading(false); //Desactivem sempre el loading 
     }
   }
 
-  function esc(str) {
+  function esc(str) { //Convertim a string els inputs de l'usuari per a que s'escriguin bé a la BD
     return String(str || "").replace(/'/g, "''");
   }
 
@@ -91,13 +91,13 @@ export default function Step2GenomeTF() {
           throw new Error("Has d’indicar un nom per a la nova família.");
         }
 
-        // crear nova família
+        //Creem nova família
         queries.push(
           `INSERT INTO core_tffamily (name, description)
            VALUES ('${esc(newFamilyName)}', '${esc(newFamilyDesc)}');`
         );
 
-        // crear TF associat a la família
+        //Creem TF associat a la família
         queries.push(
           `INSERT INTO core_tf (name, family_id, description)
            VALUES (
@@ -116,11 +116,9 @@ export default function Step2GenomeTF() {
         );
       }
 
-      await dispatchWorkflow({ queries });
+      await dispatchWorkflow({ queries }); //Enviem l'array de queries a través de serverless.js cap a Vercel
 
-      setMsg(
-        "Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy."
-      );
+      setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
       setTfRow(null);
     } catch (e) {
       console.error(e);
@@ -140,16 +138,16 @@ export default function Step2GenomeTF() {
           <input
             className="form-control"
             value={tfName}
-            onChange={(e) => setTfName(e.target.value)}
+            onChange={(e) => setTfName(e.target.value)} /*Establim el nou nom del TF*/
             placeholder="Exemple: LexA"
-          />
-          <button className="btn" onClick={handleSearchTF} disabled={loading}>
-            {loading ? "Cercant..." : "Buscar"}
-          </button>
+          /> 
+          <button className="btn" onClick={handleSearchTF} disabled={loading}> {/*Activem handleSearchTF per buscar*/}
+            {loading ? "Cercant..." : "Buscar"} 
+          </button> 
         </div>
       </div>
 
-      {msg && <p className="text-sm text-blue-300">{msg}</p>}
+      {msg && <p className="text-sm text-blue-300">{msg}</p>} {/*Missatge de info, errors, confirmacions...*/}
 
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
@@ -172,9 +170,9 @@ export default function Step2GenomeTF() {
               onChange={(e) => setSelectedFamily(e.target.value)}
             >
               <option value="">Selecciona una família...</option>
-              <option value="new">➕ Nova família</option>
+              <option value="new">+ Nova família</option>
               {families.map((f) => (
-                <option key={f.tf_family_id} value={f.tf_family_id}>
+                <option key={f.tf_family_id} value={f.tf_family_id}> {/*Mostrar totes les famílies*/}
                   {f.name}
                 </option>
               ))}
@@ -214,7 +212,7 @@ export default function Step2GenomeTF() {
             />
           </div>
 
-          <button className="btn" onClick={handleCreateTF} disabled={loading}>
+          <button className="btn" onClick={handleCreateTF} disabled={loading}>  {/*Activem handleCreateTF per inserir noves dades a la DB*/}
             {loading ? "Desant..." : "Desar nou TF"}
           </button>
         </div>
