@@ -8,7 +8,6 @@ on:
         required: false
         default: 'false'
 
-
 jobs:
   update:
     name: Update
@@ -19,26 +18,25 @@ jobs:
         uses: actions/checkout@v3
         
       - name: Install SQLite
-        if: ${{github.event.inputs.queries != 'false'}}
+        if: ${{ github.event.inputs.queries != 'false' }}
         run: sudo apt-get install sqlite3 
 
-      - name: Create SQL queries file ans activate FK
-        if: ${{github.event.inputs.queries != 'false'}}
+      - name: Create SQL queries file and activate FK
+        if: ${{ github.event.inputs.queries != 'false' }}
         run: |
           echo "PRAGMA foreign_keys = ON;" > queries.sql
-          echo "${{ github.event.inputs.queries }}" | base64 -d > queries.json
-          jq -r '.[]' queries.json >> queries.sql
+          echo "${{ github.event.inputs.queries }}" >> queries.sql
           cat queries.sql
 
       - name: Run SQL queries
-        if: ${{github.event.inputs.queries != 'false'}}
+        if: ${{ github.event.inputs.queries != 'false' }}
         run: |
           set -e
           sqlite3 ./public/CollecTF.db.gz < queries.sql
 
       - name: Delete SQL queries file
-        if: ${{github.event.inputs.queries != 'false'}}
-        run: rm queries.sql && rm queries.json
+        if: ${{ github.event.inputs.queries != 'false' }}
+        run: rm queries.sql
 
       - name: Commit updated database
         if: ${{ github.event.inputs.queries != 'false' }}
@@ -52,7 +50,7 @@ jobs:
             git commit -m "Update database via workflow_dispatch"
             git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
             git push origin main
-            echo "${{ github.repository }}"
+
             curl -X POST \
             -H "Authorization: token ${TOKEN}" \
             -H "Accept: application/vnd.github+json" \
