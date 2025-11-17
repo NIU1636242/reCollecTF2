@@ -43,6 +43,9 @@ jobs:
           name: production-files
           path: ./dist
 
+      - name: Copy updated database into dist
+        run: cp ./public/CollecTF.db.gz ./dist/CollecTF.db.gz
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
