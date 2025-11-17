@@ -116,7 +116,7 @@ export default function Step2GenomeTF() {
         );
       }
 
-      await dispatchWorkflow({ queries }); //Enviem l'array de queries a través de serverless.js cap a Vercel
+      await dispatchWorkflow({ inputs: { queries } }); //Enviem l'array de queries a través de serverless.js cap a Vercel
 
       setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
       setTfRow(null);
