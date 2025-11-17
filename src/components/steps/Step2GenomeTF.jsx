@@ -116,7 +116,10 @@ export default function Step2GenomeTF() {
         );
       }
 
-      await dispatchWorkflow({inputs: {queries: JSON.stringify(queries)}}); //Enviem l'array de queries a través de serverless.js cap a Vercel
+      //gh-actions NO accepta arrays, ho convertim en text pla
+      const sqlString = queries.join("\n");
+
+      await dispatchWorkflow({inputs: { queries: sqlString }});//Enviem l'array de queries a través de serverless.js cap a Vercel
 
       setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
       setTfRow(null);
