@@ -1,8 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } from "react"; 
 import { runQuery } from "../../db/queryExecutor";
 import { dispatchWorkflow } from "../../utils/serverless";
+import { useCuration } from "../../context/CurationContext"; //Afegit per gestionar steps i guardar TF
 
 export default function Step2GenomeTF() {
+
+  const { tf, setTf, goToNextStep } = useCuration(); //Afegit tf i goToNextStep
+
   const [tfName, setTfName] = useState("");
   const [tfRow, setTfRow] = useState(null);
   const [families, setFamilies] = useState([]);
@@ -13,6 +17,25 @@ export default function Step2GenomeTF() {
   const [msg, setMsg] = useState(""); //Missatge per a feedback
   const [loading, setLoading] = useState(false); //Bloqueja botons mentre fa la busqueda
   const [searched, setSearched] = useState(false);
+
+  //Quan tornem enrere des del Step3, restaurem les dades guardades al context
+  useEffect(() => {
+    if (!tf) return;
+
+    // Si és un TF existent, restaurar dades
+    if (tf.dbRow) {
+      setTfRow(tf.dbRow);
+      setTfName(tf.dbRow.name);
+      setTfDesc(tf.dbRow.description || "");
+      setSearched(true);
+    } else {
+      // Si era un TF creat manualment
+      setTfRow(null);
+      setTfName(tf.name || "");
+      setTfDesc(tf.description || "");
+      setSearched(true);
+    }
+  }, [tf]);
 
   useEffect(() => {
     async function fetchFamilies() {
@@ -119,7 +142,8 @@ export default function Step2GenomeTF() {
       //gh-actions NO accepta arrays, ho convertim en text pla
       const sqlString = queries.join("\n");
 
-      await dispatchWorkflow({inputs: { queries: sqlString }});//Enviem l'array de queries a través de serverless.js cap a Vercel
+      // ⚠️ IMPORTANT: aquest era el problema que rebentava el deploy!
+      await dispatchWorkflow({ queries: sqlString });
 
       setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
       setTfRow(null);
@@ -158,6 +182,22 @@ export default function Step2GenomeTF() {
           <p><strong>ID:</strong> {tfRow.TF_id}</p>
           <p><strong>Família:</strong> {tfRow.family_name}</p>
           <p><strong>Descripció:</strong> {tfRow.description || "—"}</p>
+
+          {/*Botó a next step*/}
+          <button
+            className="btn mt-4"
+            onClick={() => {
+              setTf({
+                name: tfRow.name,
+                family: tfRow.family_name,
+                description: tfRow.description,
+                dbRow: tfRow,
+              });
+              goToNextStep(); // ✔️ COM EN STEP1
+            }}
+          >
+            Confirmar i continuar →
+          </button>
         </div>
       )}
 
@@ -218,6 +258,26 @@ export default function Step2GenomeTF() {
           <button className="btn" onClick={handleCreateTF} disabled={loading}>  {/*Activem handleCreateTF per inserir noves dades a la DB*/}
             {loading ? "Desant..." : "Desar nou TF"}
           </button>
+
+          {msg.includes("actualitzarà automàticament") && ( //Botó per anar al següent step
+            <button
+              className="btn mt-4"
+              onClick={() => {
+                setTf({
+                  name: tfName,
+                  family:
+                    selectedFamily === "new"
+                      ? newFamilyName
+                      : families.find(f => f.tf_family_id == selectedFamily)?.name,
+                  description: tfDesc,
+                  dbRow: null,
+                });
+                goToNextStep();
+              }}
+            >
+              Confirmar i continuar →
+            </button>
+          )}
         </div>
       )}
     </div>
