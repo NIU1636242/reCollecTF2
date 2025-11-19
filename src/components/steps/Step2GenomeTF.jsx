@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
 import { dispatchWorkflow } from "../../utils/serverless";
+import { useCuration } from "../../context/CurationContext"; 
 
 export default function Step2GenomeTF() {
+  const { setTf, goToNextStep } = useCuration();
   const [tfName, setTfName] = useState("");
   const [tfRow, setTfRow] = useState(null);
   const [families, setFamilies] = useState([]);
@@ -159,7 +161,13 @@ export default function Step2GenomeTF() {
           <p><strong>Família:</strong> {tfRow.family_name}</p>
           <p><strong>Descripció:</strong> {tfRow.description || "—"}</p>
 
-          <button className="btn mt-4" onClick={goToNextStep}> {/*Botó a next step*/}
+          <button //Botó per setejar TF i anar al next step
+            className="btn mt-4" 
+            onClick={() => {
+              setTf(tfRow); 
+              goToNextStep();
+            }}
+          >
             Confirmar i continuar →
           </button>
         </div>
@@ -222,8 +230,19 @@ export default function Step2GenomeTF() {
           <button className="btn" onClick={handleCreateTF} disabled={loading}>  {/*Activem handleCreateTF per inserir noves dades a la DB*/}
             {loading ? "Desant..." : "Desar nou TF"}
           </button>
-          {msg.includes("actualitzarà automàticament") && ( //Botó per anar al següent step
-            <button className="btn mt-4" onClick={goToNextStep}>
+
+          {msg.includes("actualitzarà automàticament") && ( //Botó per a setejar el nou TF i Family i anar al següent step
+            <button 
+              className="btn mt-4" 
+              onClick={() => {
+                setTf({
+                  name: tfName,
+                  family: selectedFamily === "new" ? newFamilyName : families.find(f => f.tf_family_id == selectedFamily)?.name,
+                  description: tfDesc
+                });
+                goToNextStep();
+              }}
+            >
               Continuar al següent pas →
             </button>
           )}

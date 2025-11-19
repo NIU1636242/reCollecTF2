@@ -11,7 +11,8 @@ export function useCuration() { //Hook per a que desde tots els components pugue
 export function CurationProvider({ children }) {
   const [currentStep, setCurrentStep] = useState(1); //currentStep per a guardar el step en el que estem, al principi el 1
   const [publication, setPublication] = useState(null); //guardem la publication del step1, al principi null
-  const [techniques, setTechniques] = useState([]); //tècniques step3
+  const [tf, setTf] = useState(null); //TF step2
+  const [techniques, setTechniques] = useState(null); //tècniques step3
 
   const goToNextStep = () => setCurrentStep((s) => s + 1);
   const goToStep = (n) => setCurrentStep(n); 
@@ -24,6 +25,8 @@ export function CurationProvider({ children }) {
         goToNextStep,
         publication,
         setPublication,
+        tf,
+        setTf,
         techniques,
         setTechniques
       }}
