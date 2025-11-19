@@ -5,11 +5,19 @@ import { useCuration } from "../../context/CurationContext";
 export default function StepNavigation() {
   const { currentStep, goToStep } = useCuration();
 
-  const steps = ["Publication","Genome & TF","Experimental Methods","Reported Sites","Annotation","Gene Regulation","Finalize"];
+  const steps = [
+    "Publication",
+    "Genome & TF",
+    "Experimental Methods",
+    "Reported Sites",
+    "Annotation",
+    "Gene Regulation",
+    "Finalize",
+  ];
 
   return (
     <div className="mb-8">
-      {/* Barra de passos */}
+      {/* Barra de pasos */}
       <div className="flex gap-2 mb-4">
         {steps.map((label, index) => {
           const stepNumber = index + 1;
@@ -21,7 +29,6 @@ export default function StepNavigation() {
               `}
               onClick={() => goToStep(stepNumber)}
               disabled={stepNumber > currentStep} 
-              // Només desbloqueja passos anteriors o el current
             >
               Step {stepNumber}: {label}
             </button>
@@ -29,22 +36,14 @@ export default function StepNavigation() {
         })}
       </div>
 
-      {/* Controls: back & next */}
-      <div className="flex justify-between mt-4">
+      {/* Botón de retroceso */}
+      <div className="flex">
         <button
           className="btn"
           disabled={currentStep === 1}
           onClick={() => goToStep(currentStep - 1)}
         >
           ← Back
-        </button>
-
-        <button
-          className="btn"
-          disabled={currentStep === steps.length}
-          onClick={() => goToStep(currentStep + 1)}
-        >
-          Next →
         </button>
       </div>
     </div>
