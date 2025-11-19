@@ -13,6 +13,13 @@ export default function Step1Publication() {
   const PROXY = "https://corsproxy.io/?";
   const BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
+  useEffect(() => {
+  if (publication) {
+    setQuery(publication.pmid);  
+    setArticle(publication);      //Mostra info guardada al tornar enrere
+  }
+  }, [publication]);
+
   async function handleSearch(e) {
     e.preventDefault();
     setError("");

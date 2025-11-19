@@ -245,7 +245,10 @@ export default function Step2GenomeTF() {
             >
               Continuar al següent pas →
             </button>
-          )}
+            )}
+            <button className="btn-secondary mt-6" onClick={goToPrevStep}>
+              ← Back
+            </button>
         </div>
       )}
     </div>
