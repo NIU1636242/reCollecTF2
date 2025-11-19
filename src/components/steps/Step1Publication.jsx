@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useCuration } from "../../context/CurationContext"; //Per a guardar la publicació i el next step
 
 export default function Step1Publication() {
