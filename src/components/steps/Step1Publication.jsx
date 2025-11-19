@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useCuration } from "../../context/CurationContext"; //Per a guardar la publicació i el next step
 
 export default function Step1Publication() {
-  const { setPublication, goToNextStep } = useCuration();
+  const { publication, setPublication, goToNextStep } = useCuration();
 
   //Definimi 4 estats, per al PMID, missatge de càrrega, article o error
   const [query, setQuery] = useState("");
@@ -13,11 +13,14 @@ export default function Step1Publication() {
   const PROXY = "https://corsproxy.io/?";
   const BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
+  //Quan tornem enrere, si ja hi ha una publicació al context, la restaurem
   useEffect(() => {
-  if (publication) {
-    setQuery(publication.pmid);  
-    setArticle(publication);      //Mostra info guardada al tornar enrere
-  }
+    if (publication) {
+      setArticle(publication);
+      if (publication.pmid) {
+        setQuery(publication.pmid);
+      }
+    }
   }, [publication]);
 
   async function handleSearch(e) {
