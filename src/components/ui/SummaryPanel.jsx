@@ -28,7 +28,6 @@ export default function SummaryPanel() {
           <ul className="text-sm mt-1">
             <li><strong>Nom:</strong> {tf.name}</li>
             <li><strong>Família:</strong> {tf.family || tf.family_name}</li>
-            <li><strong>Descripció:</strong> {tf.description || "—"}</li>
           </ul>
         ) : (
           <p className="text-sm text-gray-400">No seleccionat</p>
