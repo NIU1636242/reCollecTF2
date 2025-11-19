@@ -158,10 +158,6 @@ export default function Step2GenomeTF() {
           <p><strong>ID:</strong> {tfRow.TF_id}</p>
           <p><strong>Família:</strong> {tfRow.family_name}</p>
           <p><strong>Descripció:</strong> {tfRow.description || "—"}</p>
-
-          <button className="btn mt-4" onClick={goToNextStep}> {/*Botó a next step*/}
-            Confirmar i continuar →
-          </button>
         </div>
       )}
 
