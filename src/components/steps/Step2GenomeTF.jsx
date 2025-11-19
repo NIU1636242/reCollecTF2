@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
 import { dispatchWorkflow } from "../../utils/serverless";
-import { useCuration } from "../../context/CurationContext";  //Afegit per guardar i restaurar TF
+import { useCuration } from "../../context/CurationContext"; 
 
 export default function Step2GenomeTF() {
-  const { tf, setTf, goToNextStep } = useCuration(); //Afegit tf i setTf
+  const { tf, setTf, goToNextStep } = useCuration();  //Afegit tf
 
   const [tfName, setTfName] = useState("");
   const [tfRow, setTfRow] = useState(null);
@@ -17,17 +17,17 @@ export default function Step2GenomeTF() {
   const [loading, setLoading] = useState(false); //Bloqueja botons mentre fa la busqueda
   const [searched, setSearched] = useState(false);
 
-  //Restaurar inputs quan tornem enrere 
+  //Restaurar dades guardades quan tornem enrere
   useEffect(() => {
     if (tf) {
       if (tf.dbRow) {
-        // TF existent restaurat
+        // Era un TF existent
         setTfRow(tf.dbRow);
         setTfName(tf.dbRow.name);
         setTfDesc(tf.dbRow.description || "");
         setSearched(true);
       } else {
-        // TF creat manualment
+        // Era un TF creat
         setTfName(tf.name || "");
         setTfDesc(tf.description || "");
         setSelectedFamily("");
@@ -66,7 +66,7 @@ export default function Step2GenomeTF() {
 
     setLoading(true);
     try {
-      const rows = await runQuery( //Busquem el TF i la seva familia si en té
+      const rows = await runQuery(
         `
         SELECT tf.*, fam.name AS family_name
         FROM core_tf tf
@@ -89,11 +89,11 @@ export default function Step2GenomeTF() {
       console.error(e);
       setMsg("Error consultant la base de dades.");
     } finally {
-      setLoading(false); //Desactivem sempre el loading 
+      setLoading(false);
     }
   }
 
-  function esc(str) { //Convertim a string els inputs de l'usuari per a que s'escriguin bé a la BD
+  function esc(str) {
     return String(str || "").replace(/'/g, "''");
   }
 
@@ -110,39 +110,40 @@ export default function Step2GenomeTF() {
       const queries = [];
 
       if (selectedFamily === "new") {
+
         if (!newFamilyName.trim()) {
           throw new Error("Has d’indicar un nom per a la nova família.");
         }
 
         //Creem nova família
-        queries.push(
-          `INSERT INTO core_tffamily (name, description)
-           VALUES ('${esc(newFamilyName)}', '${esc(newFamilyDesc)}');`
-        );
+        queries.push(`
+          INSERT INTO core_tffamily (name, description)
+          VALUES ('${esc(newFamilyName)}', '${esc(newFamilyDesc)}');
+        `);
 
         //Creem TF associat a la família
-        queries.push(
-          `INSERT INTO core_tf (name, family_id, description)
-           VALUES (
-             '${esc(name)}',
-             (SELECT tf_family_id FROM core_tffamily WHERE name='${esc(newFamilyName)}'),
-             '${esc(tfDesc)}'
-           );`
-        );
+        queries.push(`
+          INSERT INTO core_tf (name, family_id, description)
+          VALUES (
+            '${esc(name)}',
+            (SELECT tf_family_id FROM core_tffamily WHERE name='${esc(newFamilyName)}'),
+            '${esc(tfDesc)}'
+          );
+        `);
+
       } else {
         const famId = Number(selectedFamily);
         if (!famId) throw new Error("Selecciona una família vàlida o crea’n una de nova.");
 
-        queries.push(
-          `INSERT INTO core_tf (name, family_id, description)
-           VALUES ('${esc(name)}', ${famId}, '${esc(tfDesc)}');`
-        );
+        queries.push(`
+          INSERT INTO core_tf (name, family_id, description)
+          VALUES ('${esc(name)}', ${famId}, '${esc(tfDesc)}');
+        `);
       }
 
-      //gh-actions NO accepta arrays, ho convertim en text pla
+      // 🔥 IMPORTANT: NO "inputs: {queries}" → BREAKA GITHUB WORKFLOW
       const sqlString = queries.join("\n");
-
-      await dispatchWorkflow({inputs: { queries: sqlString }});//Enviem l'array de queries a través de serverless.js cap a Vercel
+      await dispatchWorkflow({ queries: sqlString });
 
       setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
       setTfRow(null);
@@ -176,7 +177,6 @@ export default function Step2GenomeTF() {
 
       {msg && <p className="text-sm text-blue-300">{msg}</p>} {/*Missatge de info, errors, confirmacions...*/}
 
-      {/*TF EXISTENT */}
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
@@ -184,15 +184,15 @@ export default function Step2GenomeTF() {
           <p><strong>Família:</strong> {tfRow.family_name}</p>
           <p><strong>Descripció:</strong> {tfRow.description || "—"}</p>
 
-          <button //Botó per setejar TF i anar al next step
+          <button
             className="btn mt-4" 
             onClick={() => {
-              setTf({ 
+              setTf({
                 name: tfRow.name,
                 family: tfRow.family_name,
                 description: tfRow.description,
-                dbRow: tfRow //Guardem info complerta
-              }); 
+                dbRow: tfRow
+              });
               goToNextStep();
             }}
           >
@@ -201,12 +201,10 @@ export default function Step2GenomeTF() {
         </div>
       )}
 
-      {/* 🔵 CREAR NOU TF */}
       {!tfRow && searched && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Crear un nou TF</h3>
 
-          {/*El formulari només es mostra mentre NO s'ha creat el TF (igual que abans) */}
           {!msg.includes("actualitzarà automàticament") && (
             <>
               <div>
@@ -219,7 +217,7 @@ export default function Step2GenomeTF() {
                   <option value="">Selecciona una família...</option>
                   <option value="new">+ Nova família</option>
                   {families.map((f) => (
-                    <option key={f.tf_family_id} value={f.tf_family_id}> {/*Mostrar totes les famílies*/}
+                    <option key={f.tf_family_id} value={f.tf_family_id}>
                       {f.name}
                     </option>
                   ))}
@@ -259,24 +257,23 @@ export default function Step2GenomeTF() {
                 />
               </div>
 
-              <button className="btn" onClick={handleCreateTF} disabled={loading}>  {/*Activem handleCreateTF per inserir noves dades a la DB*/}
+              <button className="btn" onClick={handleCreateTF} disabled={loading}>
                 {loading ? "Desant..." : "Desar nou TF"}
               </button>
             </>
           )}
 
-          {/*Quan el TF està creat → mostr ar només el botó “Confirmar i continuar” (igual que abans) */}
           {msg.includes("actualitzarà automàticament") && (
             <button 
               className="btn mt-4" 
               onClick={() => {
                 setTf({
                   name: tfName,
-                  family: selectedFamily === "new" 
-                    ? newFamilyName 
+                  family: selectedFamily === "new"
+                    ? newFamilyName
                     : families.find(f => f.tf_family_id == selectedFamily)?.name,
                   description: tfDesc,
-                  dbRow: null // Nou TF no té dbRow
+                  dbRow: null
                 });
                 goToNextStep();
               }}
