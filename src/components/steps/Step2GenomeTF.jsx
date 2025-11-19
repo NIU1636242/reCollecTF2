@@ -158,6 +158,10 @@ export default function Step2GenomeTF() {
           <p><strong>ID:</strong> {tfRow.TF_id}</p>
           <p><strong>Família:</strong> {tfRow.family_name}</p>
           <p><strong>Descripció:</strong> {tfRow.description || "—"}</p>
+
+          <button className="btn mt-4" onClick={goToNextStep}> {/*Botó a next step*/}
+            Confirmar i continuar →
+          </button>
         </div>
       )}
 
@@ -218,6 +222,11 @@ export default function Step2GenomeTF() {
           <button className="btn" onClick={handleCreateTF} disabled={loading}>  {/*Activem handleCreateTF per inserir noves dades a la DB*/}
             {loading ? "Desant..." : "Desar nou TF"}
           </button>
+          {msg.includes("actualitzarà automàticament") && ( //Botó per anar al següent step
+            <button className="btn mt-4" onClick={goToNextStep}>
+              Continuar al següent pas →
+            </button>
+          )}
         </div>
       )}
     </div>

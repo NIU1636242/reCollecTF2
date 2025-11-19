@@ -8,8 +8,9 @@ export default function StepNavigation() {
   const steps = ["Publication","Genome & TF","Experimental Methods","Reported Sites","Annotation","Gene Regulation","Finalize"];
 
   const canGo = (index) => {
-    if (index === 0) return true;
-    if (index === 1) return publication != null;
+    if (index === 0) return true; //step1
+    if (index === 1) return publication != null; //step2
+    if (index === 2) return publication != null; //step3...
     return false; //Anar afegint els próxims steps
   };
 
