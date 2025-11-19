@@ -13,7 +13,7 @@ export default function SummaryPanel() {
         {publication ? (
           <ul className="text-sm mt-1">
             <li><strong>PMID:</strong> {publication.pmid}</li>
-            <li><strong>Título:</strong> {publication.title}</li>
+            <li><strong>Títol:</strong> {publication.title}</li>
             <li><strong>DOI:</strong> {publication.doi}</li>
           </ul>
         ) : (
@@ -26,9 +26,9 @@ export default function SummaryPanel() {
         <h4 className="font-semibold text-sky-300">TF seleccionat</h4>
         {tf ? (
           <ul className="text-sm mt-1">
-            <li><strong>Nombre:</strong> {tf.name}</li>
-            <li><strong>Familia:</strong> {tf.family || tf.family_name}</li>
-            <li><strong>Descripción:</strong> {tf.description || "—"}</li>
+            <li><strong>Nom:</strong> {tf.name}</li>
+            <li><strong>Família:</strong> {tf.family || tf.family_name}</li>
+            <li><strong>Descripció:</strong> {tf.description || "—"}</li>
           </ul>
         ) : (
           <p className="text-sm text-gray-400">No seleccionat</p>
