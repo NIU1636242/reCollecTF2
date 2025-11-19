@@ -3,39 +3,50 @@
 import { useCuration } from "../../context/CurationContext";
 
 export default function StepNavigation() {
-  const { step, setStep, publication } = useCuration();
+  const { currentStep, goToStep } = useCuration();
 
   const steps = ["Publication","Genome & TF","Experimental Methods","Reported Sites","Annotation","Gene Regulation","Finalize"];
 
-  const canGo = (index) => {
-    if (index === 0) return true; //step1
-    if (index === 1) return publication != null; //step2
-    if (index === 2) return publication != null; //step3...
-    return false; //Anar afegint els próxims steps
-  };
+  return (
+    <div className="mb-8">
+      {/* Barra de passos */}
+      <div className="flex gap-2 mb-4">
+        {steps.map((label, index) => {
+          const stepNumber = index + 1;
+          return (
+            <button
+              key={index}
+              className={`px-4 py-2 rounded-md 
+                ${currentStep === stepNumber ? "bg-accent text-black" : "bg-surface text-gray-300"}
+              `}
+              onClick={() => goToStep(stepNumber)}
+              disabled={stepNumber > currentStep} 
+              // Només desbloqueja passos anteriors o el current
+            >
+              Step {stepNumber}: {label}
+            </button>
+          );
+        })}
+      </div>
 
-  return ( //HTML visible
-    <div className="flex gap-2 mb-6">
-      {steps.map((label, i) => { //Obtenim el text i la posició 
-        const current = i + 1 === step;
-        const enabled = canGo(i);
-        return (
-          <button
-            key={i}
-            onClick={() => enabled && setStep(i + 1)}
-            disabled={!enabled}
-            className={`px-3 py-2 rounded font-semibold ${
-              current
-                ? "bg-sky-500 text-gray-900"
-                : enabled
-                ? "bg-gray-700 text-gray-200"
-                : "bg-gray-800 text-gray-500 cursor-not-allowed"
-            }`}
-          >
-            Step {i + 1}: {label}
-          </button>
-        );
-      })}
+      {/* Controls: back & next */}
+      <div className="flex justify-between mt-4">
+        <button
+          className="btn"
+          disabled={currentStep === 1}
+          onClick={() => goToStep(currentStep - 1)}
+        >
+          ← Back
+        </button>
+
+        <button
+          className="btn"
+          disabled={currentStep === steps.length}
+          onClick={() => goToStep(currentStep + 1)}
+        >
+          Next →
+        </button>
+      </div>
     </div>
   );
 }

@@ -158,7 +158,7 @@ export default function Step3ExperimentalMethods() {
         <div className="flex gap-2">
           <input
             className="form-control"
-            placeholder="0005667"
+            placeholder="Exemple: 0005667"
             value={ecoInput}
             onChange={(e) => setEcoInput(e.target.value)}
           />
