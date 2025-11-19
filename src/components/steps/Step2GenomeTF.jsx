@@ -4,7 +4,8 @@ import { dispatchWorkflow } from "../../utils/serverless";
 import { useCuration } from "../../context/CurationContext"; 
 
 export default function Step2GenomeTF() {
-  const { setTf, goToNextStep } = useCuration();
+  const { tf, setTf, goToNextStep } = useCuration();  //Añadido tf
+
   const [tfName, setTfName] = useState("");
   const [tfRow, setTfRow] = useState(null);
   const [families, setFamilies] = useState([]);
@@ -15,6 +16,25 @@ export default function Step2GenomeTF() {
   const [msg, setMsg] = useState(""); //Missatge per a feedback
   const [loading, setLoading] = useState(false); //Bloqueja botons mentre fa la busqueda
   const [searched, setSearched] = useState(false);
+
+  //Restaurar dades guardades quan tornem enrere
+  useEffect(() => {
+    if (tf) {
+      // Si el TF venia d'una cerca existent
+      if (tf.dbRow) {
+        setTfRow(tf.dbRow);
+        setTfName(tf.dbRow.name);
+        setTfDesc(tf.dbRow.description || "");
+      }
+
+      // Si era un TF nou creat manualment
+      if (!tf.dbRow) {
+        setTfName(tf.name || "");
+        setSelectedFamily(""); // no el sabem
+        setTfDesc(tf.description || "");
+      }
+    }
+  }, [tf]);
 
   useEffect(() => {
     async function fetchFamilies() {
@@ -164,7 +184,12 @@ export default function Step2GenomeTF() {
           <button //Botó per setejar TF i anar al next step
             className="btn mt-4" 
             onClick={() => {
-              setTf(tfRow); 
+              setTf({ 
+                name: tfRow.name,
+                family: tfRow.family_name,
+                description: tfRow.description,
+                dbRow: tfRow
+              }); 
               goToNextStep();
             }}
           >
@@ -238,17 +263,15 @@ export default function Step2GenomeTF() {
                 setTf({
                   name: tfName,
                   family: selectedFamily === "new" ? newFamilyName : families.find(f => f.tf_family_id == selectedFamily)?.name,
-                  description: tfDesc
+                  description: tfDesc,
+                  dbRow: null
                 });
                 goToNextStep();
               }}
             >
-              Continuar al següent pas →
+              Confirmar i continuar →
             </button>
-            )}
-            <button className="btn-secondary mt-6" onClick={goToPrevStep}>
-              ← Back
-            </button>
+          )}
         </div>
       )}
     </div>

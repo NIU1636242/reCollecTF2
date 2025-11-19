@@ -233,7 +233,7 @@ export default function Step3ExperimentalMethods() {
 
       {techniques.length > 0 && (
         <button className="btn mt-4" onClick={goToNextStep}>
-          Continuar al Step 4 →
+          Confirmar i continuar →
         </button>
       )}
     </div>
