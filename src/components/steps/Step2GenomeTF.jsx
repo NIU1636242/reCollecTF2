@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
 import { dispatchWorkflow } from "../../utils/serverless";
-import { useCuration } from "../../context/CurationContext"; 
+import { useCuration } from "../../context/CurationContext";  //Afegit per guardar i restaurar TF
 
 export default function Step2GenomeTF() {
-  const { tf, setTf, goToNextStep } = useCuration();  //Añadido tf
+  const { tf, setTf, goToNextStep } = useCuration(); //Afegit tf i setTf
 
   const [tfName, setTfName] = useState("");
   const [tfRow, setTfRow] = useState(null);
@@ -17,21 +17,22 @@ export default function Step2GenomeTF() {
   const [loading, setLoading] = useState(false); //Bloqueja botons mentre fa la busqueda
   const [searched, setSearched] = useState(false);
 
-  //Restaurar dades guardades quan tornem enrere
+  //Restaurar inputs quan tornem enrere 
   useEffect(() => {
     if (tf) {
-      // Si el TF venia d'una cerca existent
       if (tf.dbRow) {
+        // TF existent restaurat
         setTfRow(tf.dbRow);
         setTfName(tf.dbRow.name);
         setTfDesc(tf.dbRow.description || "");
-      }
-
-      // Si era un TF nou creat manualment
-      if (!tf.dbRow) {
+        setSearched(true);
+      } else {
+        // TF creat manualment
         setTfName(tf.name || "");
-        setSelectedFamily(""); // no el sabem
         setTfDesc(tf.description || "");
+        setSelectedFamily("");
+        setTfRow(null);
+        setSearched(true);
       }
     }
   }, [tf]);
@@ -145,6 +146,7 @@ export default function Step2GenomeTF() {
 
       setMsg("Sol·licitud enviada. La base de dades s'actualitzarà automàticament després del redeploy.");
       setTfRow(null);
+
     } catch (e) {
       console.error(e);
       setMsg(`Error enviant les consultes: ${e.message}`);
@@ -174,6 +176,7 @@ export default function Step2GenomeTF() {
 
       {msg && <p className="text-sm text-blue-300">{msg}</p>} {/*Missatge de info, errors, confirmacions...*/}
 
+      {/*TF EXISTENT */}
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
@@ -188,7 +191,7 @@ export default function Step2GenomeTF() {
                 name: tfRow.name,
                 family: tfRow.family_name,
                 description: tfRow.description,
-                dbRow: tfRow
+                dbRow: tfRow //Guardem info complerta
               }); 
               goToNextStep();
             }}
@@ -198,73 +201,82 @@ export default function Step2GenomeTF() {
         </div>
       )}
 
+      {/* 🔵 CREAR NOU TF */}
       {!tfRow && searched && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Crear un nou TF</h3>
 
-          <div>
-            <label className="block font-medium">Família existent</label>
-            <select
-              className="form-control"
-              value={selectedFamily}
-              onChange={(e) => setSelectedFamily(e.target.value)}
-            >
-              <option value="">Selecciona una família...</option>
-              <option value="new">+ Nova família</option>
-              {families.map((f) => (
-                <option key={f.tf_family_id} value={f.tf_family_id}> {/*Mostrar totes les famílies*/}
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedFamily === "new" && (
+          {/*El formulari només es mostra mentre NO s'ha creat el TF (igual que abans) */}
+          {!msg.includes("actualitzarà automàticament") && (
             <>
               <div>
-                <label className="block font-medium">Nom de la nova família</label>
-                <input
+                <label className="block font-medium">Família existent</label>
+                <select
                   className="form-control"
-                  value={newFamilyName}
-                  onChange={(e) => setNewFamilyName(e.target.value)}
-                  placeholder="Exemple: Família LexA"
-                />
+                  value={selectedFamily}
+                  onChange={(e) => setSelectedFamily(e.target.value)}
+                >
+                  <option value="">Selecciona una família...</option>
+                  <option value="new">+ Nova família</option>
+                  {families.map((f) => (
+                    <option key={f.tf_family_id} value={f.tf_family_id}> {/*Mostrar totes les famílies*/}
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
               </div>
+
+              {selectedFamily === "new" && (
+                <>
+                  <div>
+                    <label className="block font-medium">Nom de la nova família</label>
+                    <input
+                      className="form-control"
+                      value={newFamilyName}
+                      onChange={(e) => setNewFamilyName(e.target.value)}
+                      placeholder="Exemple: Família LexA"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-medium">Descripció de la família</label>
+                    <textarea
+                      className="form-control"
+                      value={newFamilyDesc}
+                      onChange={(e) => setNewFamilyDesc(e.target.value)}
+                      placeholder="Descripció breu de la família"
+                    />
+                  </div>
+                </>
+              )}
+
               <div>
-                <label className="block font-medium">Descripció de la família</label>
+                <label className="block font-medium">Descripció del TF</label>
                 <textarea
                   className="form-control"
-                  value={newFamilyDesc}
-                  onChange={(e) => setNewFamilyDesc(e.target.value)}
-                  placeholder="Descripció breu de la família"
+                  value={tfDesc}
+                  onChange={(e) => setTfDesc(e.target.value)}
+                  placeholder="Descripció del TF"
                 />
               </div>
+
+              <button className="btn" onClick={handleCreateTF} disabled={loading}>  {/*Activem handleCreateTF per inserir noves dades a la DB*/}
+                {loading ? "Desant..." : "Desar nou TF"}
+              </button>
             </>
           )}
 
-          <div>
-            <label className="block font-medium">Descripció del TF</label>
-            <textarea
-              className="form-control"
-              value={tfDesc}
-              onChange={(e) => setTfDesc(e.target.value)}
-              placeholder="Descripció del TF"
-            />
-          </div>
-
-          <button className="btn" onClick={handleCreateTF} disabled={loading}>  {/*Activem handleCreateTF per inserir noves dades a la DB*/}
-            {loading ? "Desant..." : "Desar nou TF"}
-          </button>
-
-          {msg.includes("actualitzarà automàticament") && ( //Botó per a setejar el nou TF i Family i anar al següent step
+          {/*Quan el TF està creat → mostr ar només el botó “Confirmar i continuar” (igual que abans) */}
+          {msg.includes("actualitzarà automàticament") && (
             <button 
               className="btn mt-4" 
               onClick={() => {
                 setTf({
                   name: tfName,
-                  family: selectedFamily === "new" ? newFamilyName : families.find(f => f.tf_family_id == selectedFamily)?.name,
+                  family: selectedFamily === "new" 
+                    ? newFamilyName 
+                    : families.find(f => f.tf_family_id == selectedFamily)?.name,
                   description: tfDesc,
-                  dbRow: null
+                  dbRow: null // Nou TF no té dbRow
                 });
                 goToNextStep();
               }}
