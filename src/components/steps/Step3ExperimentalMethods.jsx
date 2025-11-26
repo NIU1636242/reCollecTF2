@@ -50,7 +50,7 @@ export default function Step3ExperimentalMethods() {
     setEcoInput(val);
     setSuggestions([]);
 
-    if (!val || val.length < 2) return;
+    if (!val) return;
 
     const rows = await runQuery(`
       SELECT EO_term, name
