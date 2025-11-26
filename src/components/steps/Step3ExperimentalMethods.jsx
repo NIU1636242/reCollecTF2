@@ -8,37 +8,62 @@ export default function Step3ExperimentalMethods() {
 
   const [ecoInput, setEcoInput] = useState("");
   const [validatedEco, setValidatedEco] = useState(null);
-  const [ecoName, setEcoName] = useState(""); // Nombre del ECO desde QuickGO
+  const [ecoName, setEcoName] = useState("");
   const [existsInDB, setExistsInDB] = useState(null);
-  const [categories, setCategories] = useState([]);  // lista categorías DB
+
+  const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [techDescription, setTechDescription] = useState("");
+
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  /** Utility to escape quotes */
+  const [suggestions, setSuggestions] = useState([]);   // NEW: autocomplete list
+
+  /** Escape SQL */
   function esc(str) {
     return String(str || "").replace(/'/g, "''");
   }
 
-  /** Cargar todas las categorías de la BD */
+  /** Restore previous Step3 state */
+  useEffect(() => {
+    if (!techniques || techniques.length === 0) return;
+    // Nothing specific to restore except techniques list.
+    // State stays in context.
+  }, []);
+
+  /** Load categories */
   useEffect(() => {
     async function fetchCategories() {
-      try {
-        const rows = await runQuery(`
-          SELECT category_id, name
-          FROM core_experimentaltechniquecategory
-          ORDER BY name ASC
-        `);
-        setCategories(rows);
-      } catch (e) {
-        console.error("Error loading categories:", e);
-      }
+      const rows = await runQuery(`
+        SELECT category_id, name
+        FROM core_experimentaltechniquecategory
+        ORDER BY name ASC
+      `);
+      setCategories(rows);
     }
     fetchCategories();
   }, []);
 
-  /** Validar ECO usando QuickGO API */
+  /** Autocomplete by name or ECO */
+  async function handleAutocomplete(val) {
+    setEcoInput(val);
+    setSuggestions([]);
+
+    if (!val || val.length < 2) return;
+
+    const rows = await runQuery(`
+      SELECT EO_term, name
+      FROM core_experimentaltechnique
+      WHERE LOWER(name) LIKE LOWER(? || '%')
+         OR LOWER(EO_term) LIKE LOWER(? || '%')
+      ORDER BY name ASC
+    `, [val, val]);
+
+    setSuggestions(rows);
+  }
+
+  /** Validate ECO or Name */
   async function validateEcoAPI(code) {
     try {
       const res = await fetch(
@@ -49,8 +74,7 @@ export default function Step3ExperimentalMethods() {
       if (!res.ok) return null;
 
       const json = await res.json();
-      if (json.results?.length > 0)
-        return json.results[0];  // retornamos objeto ECO
+      if (json.results?.length > 0) return json.results[0];
 
       return null;
     } catch {
@@ -58,7 +82,7 @@ export default function Step3ExperimentalMethods() {
     }
   }
 
-  /** Cuando se pulsa VALIDAR */
+  /** Validate button */
   async function handleValidate() {
     setMsg("");
     setExistsInDB(null);
@@ -66,56 +90,47 @@ export default function Step3ExperimentalMethods() {
 
     let raw = ecoInput.trim().toUpperCase();
 
-    // Auto-prepend ECO:
-    if (!raw.startsWith("ECO:")) {
-      raw = "ECO:" + raw;
-    }
+    if (!raw.startsWith("ECO:")) raw = "ECO:" + raw;
 
     setLoading(true);
-
     try {
       const ecoObj = await validateEcoAPI(raw);
       if (!ecoObj) {
-        setMsg("Aquest ECO no existeix a QuickGO.");
+        setMsg("This ECO does not exist in QuickGO.");
         return;
       }
 
-      // Guardamos ECO validat
       setValidatedEco(raw);
       setEcoName(ecoObj.name);
-      setMsg("ECO validat correctament.");
+      setMsg("ECO successfully validated.");
 
-      // Comprobar si existe en la BD
       const rows = await runQuery(
         `SELECT * FROM core_experimentaltechnique WHERE EO_term = ?`,
         [raw]
       );
-
       setExistsInDB(rows.length > 0);
+
     } catch (err) {
-      console.error(err);
-      setMsg("Error validant l’ECO.");
+      setMsg("Error validating ECO.");
     } finally {
       setLoading(false);
     }
   }
 
-  /** Añadir ECO existente */
+  /** Add existing ECO */
   function handleAddExisting() {
-    if (!validatedEco) return;
-
     const newList = [...techniques, validatedEco];
     setTechniques(newList);
 
-    setMsg("ECO afegit.");
+    setMsg("ECO added to curation.");
     setValidatedEco(null);
     setEcoInput("");
   }
 
-  /** Crear ECO nuevo */
+  /** Create new ECO */
   async function handleCreateEco() {
     if (!selectedCategory) {
-      setMsg("Cal seleccionar una categoria.");
+      setMsg("Please select a category.");
       return;
     }
 
@@ -131,20 +146,20 @@ export default function Step3ExperimentalMethods() {
     `;
 
     try {
-      await dispatchWorkflow({ inputs: { queries: sql } });
-      setMsg("ECO creat i relacionat amb la categoria. La BD s'actualitzarà després del redeploy.");
+      await dispatchWorkflow({
+        inputs: { queries: sql }
+      });
 
+      setMsg("ECO created. Will be written to DB at Step 7 deploy.");
       setTechniques([...techniques, validatedEco]);
 
-      // reset
       setValidatedEco(null);
       setEcoInput("");
       setSelectedCategory("");
       setTechDescription("");
 
-    } catch (err) {
-      console.error(err);
-      setMsg("Error enviant consultes.");
+    } catch {
+      setMsg("Error sending queries.");
     }
   }
 
@@ -152,50 +167,67 @@ export default function Step3ExperimentalMethods() {
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Step 3 – Experimental Methods</h2>
 
-      {/* INPUT ECO */}
+      {/* INPUT with autocomplete */}
       <div>
-        <label className="block font-medium">Introdueix un codi ECO</label>
-        <div className="flex gap-2">
-          <input
-            className="form-control"
-            placeholder="Exemple: 0005667"
-            value={ecoInput}
-            onChange={(e) => setEcoInput(e.target.value)}
-          />
-          <button className="btn" onClick={handleValidate} disabled={loading}>
-            {loading ? "Validant..." : "Validar"}
-          </button>
-        </div>
+        <label className="block font-medium">Enter ECO code or name</label>
+        <input
+          className="form-control"
+          placeholder="Example: 0005667 or Chromatin binding"
+          value={ecoInput}
+          onChange={(e) => handleAutocomplete(e.target.value)}
+        />
+
+        {/* AUTOCOMPLETE DROPDOWN */}
+        {suggestions.length > 0 && (
+          <div className="border border-border p-2 bg-surface rounded mt-1">
+            {suggestions.map((s) => (
+              <div
+                key={s.EO_term}
+                className="p-1 hover:bg-muted cursor-pointer"
+                onClick={() => {
+                  setEcoInput(s.EO_term);
+                  setSuggestions([]);
+                }}
+              >
+                {s.name} ({s.EO_term})
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button className="btn mt-2" onClick={handleValidate} disabled={loading}>
+          {loading ? "Validating..." : "Validate"}
+        </button>
       </div>
 
       {msg && <p className="text-blue-300">{msg}</p>}
 
-      {/* ECO EXISTEIX A BD */}
+      {/* EXISTS IN DB */}
       {validatedEco && existsInDB === true && (
         <div className="p-4 bg-surface border border-border rounded">
-          <p>L’ECO existeix a la base de dades.</p>
+          <p>This ECO already exists in the database.</p>
           <p><strong>{ecoName}</strong></p>
           <button className="btn mt-2" onClick={handleAddExisting}>
-            Afegir a la curació
+            Add to curation
           </button>
         </div>
       )}
 
-      {/* ECO NO EXISTEIX — CREAR */}
+      {/* CREATE NEW */}
       {validatedEco && existsInDB === false && (
         <div className="p-4 bg-surface border border-border rounded space-y-3">
-          <h3 className="text-lg font-semibold">Crear nova tècnica experimental</h3>
+          <h3 className="text-lg font-semibold">Create new experimental technique</h3>
 
           <p><strong>{ecoName}</strong> ({validatedEco})</p>
 
           <div>
-            <label className="block font-medium">Categoria</label>
+            <label className="block font-medium">Category</label>
             <select
               className="form-control"
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
             >
-              <option value="">Selecciona categoria...</option>
+              <option value="">Select a category...</option>
               {categories.map((c) => (
                 <option key={c.category_id} value={c.category_id}>
                   {c.name}
@@ -205,25 +237,23 @@ export default function Step3ExperimentalMethods() {
           </div>
 
           <div>
-            <label className="block font-medium">Descripció</label>
+            <label className="block font-medium">Description</label>
             <textarea
               className="form-control"
               value={techDescription}
               onChange={(e) => setTechDescription(e.target.value)}
-              placeholder="Descripció breu"
             />
           </div>
 
           <button className="btn" onClick={handleCreateEco}>
-            Desa nova tècnica
+            Save new technique
           </button>
         </div>
       )}
 
-      {/* LLISTA TÈCNIQUES */}
       <div>
-        <h3 className="font-semibold mt-4">Tècniques afegides:</h3>
-        {techniques.length === 0 && <p>Encara no n’has afegit cap.</p>}
+        <h3 className="font-semibold mt-4">Added techniques:</h3>
+        {techniques.length === 0 && <p>None yet.</p>}
         <ul className="list-disc pl-6">
           {techniques.map((t, i) => (
             <li key={i}>{t}</li>
@@ -233,7 +263,7 @@ export default function Step3ExperimentalMethods() {
 
       {techniques.length > 0 && (
         <button className="btn mt-4" onClick={goToNextStep}>
-          Confirmar i continuar →
+          Confirm and continue →
         </button>
       )}
     </div>
