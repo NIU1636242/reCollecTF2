@@ -50,7 +50,7 @@ export default function Step3ExperimentalMethods() {
     setEcoInput(val);
     setSuggestions([]);
 
-    if (!val) return;
+    if (!val || val.length < 2) return;
 
     const rows = await runQuery(`
       SELECT EO_term, name
@@ -146,13 +146,17 @@ export default function Step3ExperimentalMethods() {
     `;
 
     try {
-      await dispatchWorkflow({
-        inputs: { queries: sql }
-      });
-
       setMsg("ECO created. Will be written to DB at Step 7 deploy.");
-      setTechniques([...techniques, validatedEco]);
-
+      setTechniques([
+        ...techniques,
+        {
+          eco: validatedEco,
+          name: ecoName,
+          category_id: selectedCategory,
+          description: techDescription,
+          sql: sql // saved so Step 7 can execute all pending queries
+        }
+      ]);
       setValidatedEco(null);
       setEcoInput("");
       setSelectedCategory("");
