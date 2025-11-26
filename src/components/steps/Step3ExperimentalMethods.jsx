@@ -132,18 +132,7 @@ export default function Step3ExperimentalMethods() {
       );
     `;
 
-    setTechniques([
-      ...techniques,
-      {
-        eco: validatedEco,
-        name: ecoName,
-        category_id: selectedCategory,
-        description: techDescription,
-        sql: sql
-      }
-    ]);
-
-    // reset form
+    setTechniques([...techniques, validatedEco]);
     setValidatedEco(null);
     setEcoInput("");
     setSelectedCategory("");
@@ -161,7 +150,7 @@ export default function Step3ExperimentalMethods() {
         <div className="flex gap-2">
           <input
             className="form-control flex-1"
-            placeholder="Example: 0005667 or ChIP-Seq"
+            placeholder="Example: ECO:0005667 or ChIP-Seq"
             value={ecoInput}
             onChange={(e) => handleAutocomplete(e.target.value)}
           />
