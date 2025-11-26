@@ -34,20 +34,18 @@ export default function Step2GenomeTF() {
 
     // Caso 1 → TF existente en la BBDD (tiene ID)
     if (tf.TF_id) {
-      setTfRow(tf);                 
-      setSearchName(tf.name || ""); // Rellenamos el input de búsqueda
-      setShowCreateForm(false);     // No mostrar el formulario de creación
-      setNewTfCreated(false);       // No mostrar el confirm button de creación
-    return;
+      setTfRow(tf);
+      setSearchName(tf.name || "");
+      setShowCreateForm(false);
+      return;
     }
 
     // Caso 2 → TF creado manualmente (no tiene ID)
-    setTfRow(null);                  // No mostrar TF, porque no existe en BD
-    setShowCreateForm(true);         // Mostrar el formulario de creación
-    setNewTFName(tf.name || "");     
-    setSelectedFamily(tf.family_id || ""); 
-    setTfDesc(tf.description || ""); 
-    setNewTfCreated(true);           // Mostrar botón "Confirm and continue"
+    setTfRow(null);
+    setShowCreateForm(true);
+    setNewTFName(tf.name || "");
+    setSelectedFamily(tf.family_id || "");
+    setTfDesc(tf.description || "");
   }, [tf]);
 
   // LOAD FAMILY LIST
@@ -237,13 +235,12 @@ export default function Step2GenomeTF() {
                 key={s.TF_id}
                 className="p-1 hover:bg-muted cursor-pointer"
                 onClick={() => {
+                  // SOLO rellenar input
                   setSearchName(s.name);
                   setSuggestions([]);
 
-                  // Espera a que React actualice el estado antes de buscar
-                  setTimeout(() => {
-                  handleSearchTF();
-                  }, 0);
+                  // BUSCAR directamente ese TF
+                  setTimeout(() => handleSearchTF(), 0);
                 }}
               >
                 {s.name} ({s.family_name})
