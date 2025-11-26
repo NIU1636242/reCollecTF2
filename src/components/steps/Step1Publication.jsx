@@ -24,41 +24,102 @@ export default function Step1Publication() {
   }, [publication]);
 
   async function handleSearch(e) {
-    e.preventDefault();
-    setError("");
-    setArticle(null);
-    if (!query.trim()) return;
+  e.preventDefault();
+  setError("");
+  setArticle(null);
 
-    setLoading(true);
-    try {
-      let data = null;
+  if (!query.trim()) return;
 
-      if (/^\d+$/.test(query.trim())) {
-        const url = `${BASE}/esummary.fcgi?db=pubmed&id=${query.trim()}&retmode=json`;
-        const res = await fetch(PROXY + encodeURIComponent(url));
-        const json = await res.json();
-        const rec = json.result?.[query.trim()];
-        if (rec) {
-          data = {
-            pmid: query.trim(),
-            title: rec.title || "Títol no disponible",
-            authors: (rec.authors || []).map((a) => a.name).join(", "),
-            journal: rec.fulljournalname || "Desconegut",
-            pubdate: rec.pubdate || "Sense data",
-            doi: rec.elocationid || "Sense DOI",
-          };
-        }
+  setLoading(true);
+
+  try {
+    let data = null;
+    const q = query.trim();
+
+    // Detectar tipo de entrada
+    const isPMID = /^\d+$/.test(q);
+    const isDOI = q.includes("/");
+
+    //BÚSQUEDA POR PMID
+    if (isPMID) {
+      const url = `${BASE}/esummary.fcgi?db=pubmed&id=${q}&retmode=json`;
+      const res = await fetch(PROXY + encodeURIComponent(url));
+      const json = await res.json();
+      const rec = json.result?.[q];
+
+      if (rec) {
+        data = {
+          pmid: q,
+          title: rec.title || "Títol no disponible",
+          authors: (rec.authors || []).map((a) => a.name).join(", "),
+          journal: rec.fulljournalname || "Desconegut",
+          pubdate: rec.pubdate || "Sense data",
+          doi: rec.elocationid || "Sense DOI",
+        };
       }
-
-      if (!data) throw new Error("No s'han trobat resultats");
-      setArticle(data);
-    } catch (e) {
-      console.error(e);
-      setError("Error buscant l'article.");
-    } finally {
-      setLoading(false);
     }
+
+    //BÚSQUEDA POR DOI
+    else if (isDOI) {
+      const url = `https://api.crossref.org/works/${encodeURIComponent(q)}`;
+      const res = await fetch(PROXY + encodeURIComponent(url));
+      const json = await res.json();
+
+      const rec = json.message;
+
+      if (rec) {
+        data = {
+          pmid: null,
+          title: rec.title?.[0] || "Títol no disponible",
+          authors: rec.author?.map(a => `${a.given || ""} ${a.family || ""}`).join(", ") || "",
+          journal: rec["container-title"]?.[0] || "Desconegut",
+          pubdate: rec.created?.["date-time"]?.split("T")[0] || "Sense data",
+          doi: q,
+        };
+      }
+    }
+
+    //BÚSQUEDA POR TÍTULO (ESearch → ESummary)
+    else {
+      // Buscar IDs por título
+      const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(q)}`;
+      const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
+      const js1 = await r1.json();
+
+      const idList = js1.esearchresult?.idlist;
+      if (idList?.length === 0) throw new Error("No s'han trobat resultats.");
+
+      const pmid = idList[0];
+
+      const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
+      const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
+      const js2 = await r2.json();
+
+      const rec = js2.result?.[pmid];
+      if (rec) {
+        data = {
+          pmid,
+          title: rec.title || "Títol no disponible",
+          authors: (rec.authors || []).map((a) => a.name).join(", "),
+          journal: rec.fulljournalname || "Desconegut",
+          pubdate: rec.pubdate || "Sense data",
+          doi: rec.elocationid || "Sense DOI",
+        };
+      }
+    }
+
+    if (!data) throw new Error("No s'han trobat resultats.");
+
+    setArticle(data);
+
+  } catch (e) {
+    console.error(e);
+    setError("Error buscant l'article.");
+  } finally {
+    setLoading(false);
   }
+}
+
 
   const handleConfirm = () => {
     if (article) {
