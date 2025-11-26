@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
-import { useCuration } from "../../context/CurationContext"; //Per a guardar la publicació i el next step
+import { useCuration } from "../../context/CurationContext";
 
 export default function Step1Publication() {
   const { publication, setPublication, goToNextStep } = useCuration();
 
-  //Definimi 4 estats, per al PMID, missatge de càrrega, article o error
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [article, setArticle] = useState(null);
@@ -13,112 +12,127 @@ export default function Step1Publication() {
   const PROXY = "https://corsproxy.io/?";
   const BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
-  //Quan tornem enrere, si ja hi ha una publicació al context, la restaurem
   useEffect(() => {
     if (publication) {
       setArticle(publication);
-      if (publication.pmid) {
-        setQuery(publication.pmid);
-      }
+      if (publication.pmid) setQuery(publication.pmid);
     }
   }, [publication]);
 
+
+  //DOI → PMID helper
+  async function lookupPMIDfromTitle(title) {
+    const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(title)}`;
+    const res = await fetch(PROXY + encodeURIComponent(esearchUrl));
+    const json = await res.json();
+
+    const pmid = json.esearchresult?.idlist?.[0];
+    return pmid || null;
+  }
+
+
+  //Main search function
   async function handleSearch(e) {
-  e.preventDefault();
-  setError("");
-  setArticle(null);
+    e.preventDefault();
+    setError("");
+    setArticle(null);
 
-  if (!query.trim()) return;
+    if (!query.trim()) return;
 
-  setLoading(true);
+    setLoading(true);
 
-  try {
-    let data = null;
-    const q = query.trim();
+    try {
+      let data = null;
+      const q = query.trim();
+      const isPMID = /^\d+$/.test(q);
+      const isDOI = q.includes("/");
 
-    // Detectar tipo de entrada
-    const isPMID = /^\d+$/.test(q);
-    const isDOI = q.includes("/");
+      //Search by PMID
+      if (isPMID) {
+        const url = `${BASE}/esummary.fcgi?db=pubmed&id=${q}&retmode=json`;
+        const res = await fetch(PROXY + encodeURIComponent(url));
+        const json = await res.json();
+        const rec = json.result?.[q];
 
-    //BÚSQUEDA POR PMID
-    if (isPMID) {
-      const url = `${BASE}/esummary.fcgi?db=pubmed&id=${q}&retmode=json`;
-      const res = await fetch(PROXY + encodeURIComponent(url));
-      const json = await res.json();
-      const rec = json.result?.[q];
-
-      if (rec) {
-        data = {
-          pmid: q,
-          title: rec.title || "Títol no disponible",
-          authors: (rec.authors || []).map((a) => a.name).join(", "),
-          journal: rec.fulljournalname || "Desconegut",
-          pubdate: rec.pubdate || "Sense data",
-          doi: rec.elocationid || "Sense DOI",
-        };
+        if (rec) {
+          data = {
+            pmid: q,
+            title: rec.title || "Title not available",
+            authors: (rec.authors || []).map(a => a.name).join(", "),
+            journal: rec.fulljournalname || "Unknown",
+            pubdate: rec.pubdate || "No date",
+            doi: rec.elocationid || "No DOI",
+          };
+        }
       }
-    }
 
-    //BÚSQUEDA POR DOI
-    else if (isDOI) {
-      const url = `https://api.crossref.org/works/${encodeURIComponent(q)}`;
-      const res = await fetch(PROXY + encodeURIComponent(url));
-      const json = await res.json();
+      //Search by DOI (CrossRef → PMID → ESummary)
+      else if (isDOI) {
+        const url = `https://api.crossref.org/works/${encodeURIComponent(q)}`;
+        const res = await fetch(PROXY + encodeURIComponent(url));
+        const json = await res.json();
+        const rec = json.message;
 
-      const rec = json.message;
+        if (!rec) throw new Error("No CrossRef record found.");
 
-      if (rec) {
+        // Try to get PMID using PubMed title search
+        const pmid = await lookupPMIDfromTitle(rec.title?.[0] || "");
+
+        let pubmedRec = null;
+
+        if (pmid) {
+          const sumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
+          const r2 = await fetch(PROXY + encodeURIComponent(sumUrl));
+          const js2 = await r2.json();
+          pubmedRec = js2.result?.[pmid];
+        }
+
         data = {
-          pmid: null,
-          title: rec.title?.[0] || "Títol no disponible",
-          authors: rec.author?.map(a => `${a.given || ""} ${a.family || ""}`).join(", ") || "",
-          journal: rec["container-title"]?.[0] || "Desconegut",
-          pubdate: rec.created?.["date-time"]?.split("T")[0] || "Sense data",
+          pmid: pmid || "—",
+          title: rec.title?.[0] || "Title not available",
+          authors: rec.author?.map(a => `${a.given || ""} ${a.family || ""}`).join(", "),
+          journal: pubmedRec?.fulljournalname || rec["container-title"]?.[0] || "Unknown",
+          pubdate: pubmedRec?.pubdate || rec.created?.["date-time"]?.split("T")[0] || "No date",
           doi: q,
         };
       }
-    }
 
-    //BÚSQUEDA POR TÍTULO (ESearch → ESummary)
-    else {
-      // Buscar IDs por título
-      const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(q)}`;
-      const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
-      const js1 = await r1.json();
+      //Search by TITLE (ESearch → ESummary)
+      else {
+        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(q)}`;
+        const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
+        const js1 = await r1.json();
 
-      const idList = js1.esearchresult?.idlist;
-      if (idList?.length === 0) throw new Error("No s'han trobat resultats.");
+        const pmid = js1.esearchresult?.idlist?.[0];
+        if (!pmid) throw new Error("No PubMed matches found.");
 
-      const pmid = idList[0];
+        const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
+        const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
+        const js2 = await r2.json();
 
-      const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
-      const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
-      const js2 = await r2.json();
-
-      const rec = js2.result?.[pmid];
-      if (rec) {
-        data = {
-          pmid,
-          title: rec.title || "Títol no disponible",
-          authors: (rec.authors || []).map((a) => a.name).join(", "),
-          journal: rec.fulljournalname || "Desconegut",
-          pubdate: rec.pubdate || "Sense data",
-          doi: rec.elocationid || "Sense DOI",
-        };
+        const rec = js2.result?.[pmid];
+        if (rec) {
+          data = {
+            pmid,
+            title: rec.title || "Title not available",
+            authors: (rec.authors || []).map(a => a.name).join(", "),
+            journal: rec.fulljournalname || "Unknown",
+            pubdate: rec.pubdate || "No date",
+            doi: rec.elocationid || "No DOI",
+          };
+        }
       }
+
+      if (!data) throw new Error("No results found.");
+      setArticle(data);
+
+    } catch (e) {
+      console.error(e);
+      setError("Error searching the article.");
+    } finally {
+      setLoading(false);
     }
-
-    if (!data) throw new Error("No s'han trobat resultats.");
-
-    setArticle(data);
-
-  } catch (e) {
-    console.error(e);
-    setError("Error buscant l'article.");
-  } finally {
-    setLoading(false);
   }
-}
 
 
   const handleConfirm = () => {
@@ -128,6 +142,7 @@ export default function Step1Publication() {
     }
   };
 
+
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold mb-4">Step 1 – Publication</h2>
@@ -135,12 +150,12 @@ export default function Step1Publication() {
       <div className="flex gap-2">
         <input
           className="form-control"
-          placeholder="PMID (37907733)"
+          placeholder="PMID, DOI or Title"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <button className="btn" onClick={handleSearch} disabled={loading}>
-          {loading ? "Buscant..." : "Buscar"}
+          {loading ? "Searching..." : "Search"}
         </button>
       </div>
 
@@ -149,19 +164,15 @@ export default function Step1Publication() {
       {article && (
         <div className="bg-surface border border-border rounded p-4 space-y-1">
           <h3 className="text-xl font-semibold">{article.title}</h3>
-          <p><strong>Autors:</strong> {article.authors}</p>
-          <p><strong>Revista:</strong> {article.journal}</p>
-          <p><strong>Data:</strong> {article.pubdate}</p>
+          <p><strong>Authors:</strong> {article.authors}</p>
+          <p><strong>Journal:</strong> {article.journal}</p>
+          <p><strong>Date:</strong> {article.pubdate}</p>
           <p><strong>PMID:</strong> {article.pmid}</p>
           <p><strong>DOI:</strong> {article.doi}</p>
 
           <div className="pt-3">
-            <button
-              className="btn"
-              onClick={handleConfirm}
-              disabled={!article.title}
-            >
-              Confirmar i continuar →
+            <button className="btn" onClick={handleConfirm}>
+              Confirm and continue →
             </button>
           </div>
         </div>
