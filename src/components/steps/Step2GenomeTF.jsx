@@ -87,19 +87,19 @@ export default function Step2GenomeTF() {
   }
 
   // SEARCH BUTTON → EXACT MATCH
-  async function handleSearchTF() {
+  async function handleSearchTF(nameOverride) {
     setMessage("");
     setTfRow(null);
     setShowCreateForm(false);
     setSuggestions([]);
 
-    const name = searchName.trim();
+    const name = (nameOverride ?? searchName).trim();
     if (!name) return;
 
     setLoading(true);
     try {
       const rows = await runQuery(
-        `
+      `
         SELECT tf.*, 
                fam.name AS family_name,
                fam.description AS family_description
@@ -107,8 +107,8 @@ export default function Step2GenomeTF() {
         LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id
         WHERE LOWER(tf.name) = LOWER(?)
         LIMIT 1;
-        `,
-        [name]
+      `,
+      [name]
       );
 
       if (rows.length) {
@@ -117,7 +117,7 @@ export default function Step2GenomeTF() {
       } else {
         setMessage("TF not found. You can create it.");
         setShowCreateForm(true);
-        setNewTFName(searchName);
+        setNewTFName(name);
       }
     } catch (err) {
       console.error(err);
@@ -213,19 +213,19 @@ export default function Step2GenomeTF() {
           <button className="btn" onClick={handleSearchTF} disabled={loading}>
             {loading ? "Searching..." : "Search"}
           </button>
-
-          <button
-            className="btn"
-            onClick={() => {
-              setShowCreateForm(true);
-              setTfRow(null);
-              setSuggestions([]);
-              setNewTFName(searchName);
-            }}
-          >
-            + Add TF
-          </button>
         </div>
+
+      <button
+        className="btn"
+          onClick={() => {
+            setShowCreateForm(true);
+            setTfRow(null);
+            setSuggestions([]);
+            setNewTFName(searchName);
+          }}
+      >
+          + Add TF
+      </button>
 
         {/* AUTOCOMPLETE DROPDOWN */}
         {suggestions.length > 0 && (
@@ -235,12 +235,10 @@ export default function Step2GenomeTF() {
                 key={s.TF_id}
                 className="p-1 hover:bg-muted cursor-pointer"
                 onClick={() => {
-                  // SOLO rellenar input
+                  const name = s.name;
                   setSearchName(s.name);
                   setSuggestions([]);
-
-                  // BUSCAR directamente ese TF
-                  setTimeout(() => handleSearchTF(), 0);
+                  handleSearchTF(name);   // le pasamos el nombre explícitamente
                 }}
               >
                 {s.name} ({s.family_name})
