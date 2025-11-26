@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
-import { dispatchWorkflow } from "../../utils/serverless";
 import { useCuration } from "../../context/CurationContext";
 
 export default function Step3ExperimentalMethods() {
@@ -15,24 +14,20 @@ export default function Step3ExperimentalMethods() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [techDescription, setTechDescription] = useState("");
 
-  const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const [suggestions, setSuggestions] = useState([]);   // NEW: autocomplete list
+  const [suggestions, setSuggestions] = useState([]);
 
   /** Escape SQL */
   function esc(str) {
     return String(str || "").replace(/'/g, "''");
   }
 
-  /** Restore previous Step3 state */
+  /** Restore state when coming back */
   useEffect(() => {
-    if (!techniques || techniques.length === 0) return;
-    // Nothing specific to restore except techniques list.
-    // State stays in context.
+    // techniques already stored automatically — nothing else needed
   }, []);
 
-  /** Load categories */
+  /** Load technique categories */
   useEffect(() => {
     async function fetchCategories() {
       const rows = await runQuery(`
@@ -45,95 +40,87 @@ export default function Step3ExperimentalMethods() {
     fetchCategories();
   }, []);
 
-  /** Autocomplete by name or ECO */
+  /** Autocomplete (name or ECO code) */
   async function handleAutocomplete(val) {
     setEcoInput(val);
-    setSuggestions([]);
+    setValidatedEco(null);
+    setExistsInDB(null);
 
-    if (!val || val.length < 2) return;
+    if (!val) {
+      setSuggestions([]);
+      return;
+    }
 
-    const rows = await runQuery(`
+    const rows = await runQuery(
+      `
       SELECT EO_term, name
       FROM core_experimentaltechnique
       WHERE LOWER(name) LIKE LOWER(? || '%')
          OR LOWER(EO_term) LIKE LOWER(? || '%')
       ORDER BY name ASC
-    `, [val, val]);
+      `,
+      [val, val]
+    );
 
     setSuggestions(rows);
   }
 
-  /** Validate ECO or Name */
+  /** QuickGO validation */
   async function validateEcoAPI(code) {
     try {
       const res = await fetch(
         `https://www.ebi.ac.uk/QuickGO/services/ontology/eco/terms/${code}`,
         { headers: { Accept: "application/json" } }
       );
-
       if (!res.ok) return null;
 
       const json = await res.json();
-      if (json.results?.length > 0) return json.results[0];
-
-      return null;
+      return json.results?.length > 0 ? json.results[0] : null;
     } catch {
       return null;
     }
   }
 
-  /** Validate button */
+  /** Validate ECO button */
   async function handleValidate() {
-    setMsg("");
-    setExistsInDB(null);
+    setLoading(true);
     setValidatedEco(null);
+    setExistsInDB(null);
 
     let raw = ecoInput.trim().toUpperCase();
-
     if (!raw.startsWith("ECO:")) raw = "ECO:" + raw;
 
-    setLoading(true);
     try {
       const ecoObj = await validateEcoAPI(raw);
       if (!ecoObj) {
-        setMsg("This ECO does not exist in QuickGO.");
+        setValidatedEco(null);
         return;
       }
 
       setValidatedEco(raw);
       setEcoName(ecoObj.name);
-      setMsg("ECO successfully validated.");
 
+      // check DB existence
       const rows = await runQuery(
         `SELECT * FROM core_experimentaltechnique WHERE EO_term = ?`,
         [raw]
       );
       setExistsInDB(rows.length > 0);
 
-    } catch (err) {
-      setMsg("Error validating ECO.");
     } finally {
       setLoading(false);
     }
   }
 
-  /** Add existing ECO */
+  /** Add existing ECO from DB */
   function handleAddExisting() {
-    const newList = [...techniques, validatedEco];
-    setTechniques(newList);
-
-    setMsg("ECO added to curation.");
+    setTechniques([...techniques, validatedEco]);
     setValidatedEco(null);
     setEcoInput("");
   }
 
-  /** Create new ECO */
+  /** Create new ECO (saved only for step7 deploy) */
   async function handleCreateEco() {
-    if (!selectedCategory) {
-      setMsg("Please select a category.");
-      return;
-    }
-
     const sql = `
       INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
       VALUES ('${esc(ecoName)}', '${esc(techDescription)}', NULL, '${esc(validatedEco)}');
@@ -145,43 +132,46 @@ export default function Step3ExperimentalMethods() {
       );
     `;
 
-    try {
-      setMsg("ECO created. Will be written to DB at Step 7 deploy.");
-      setTechniques([
-        ...techniques,
-        {
-          eco: validatedEco,
-          name: ecoName,
-          category_id: selectedCategory,
-          description: techDescription,
-          sql: sql // saved so Step 7 can execute all pending queries
-        }
-      ]);
-      setValidatedEco(null);
-      setEcoInput("");
-      setSelectedCategory("");
-      setTechDescription("");
+    setTechniques([
+      ...techniques,
+      {
+        eco: validatedEco,
+        name: ecoName,
+        category_id: selectedCategory,
+        description: techDescription,
+        sql: sql
+      }
+    ]);
 
-    } catch {
-      setMsg("Error sending queries.");
-    }
+    // reset form
+    setValidatedEco(null);
+    setEcoInput("");
+    setSelectedCategory("");
+    setTechDescription("");
   }
 
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Step 3 – Experimental Methods</h2>
 
-      {/* INPUT with autocomplete */}
+      {/* INPUT + Validate button */}
       <div>
         <label className="block font-medium">Enter ECO code or name</label>
-        <input
-          className="form-control"
-          placeholder="Example: 0005667 or Chromatin binding"
-          value={ecoInput}
-          onChange={(e) => handleAutocomplete(e.target.value)}
-        />
 
-        {/* AUTOCOMPLETE DROPDOWN */}
+        <div className="flex gap-2">
+          <input
+            className="form-control flex-1"
+            placeholder="Example: 0005667 or ChIP-Seq"
+            value={ecoInput}
+            onChange={(e) => handleAutocomplete(e.target.value)}
+          />
+
+          <button className="btn" onClick={handleValidate} disabled={loading}>
+            {loading ? "..." : "Validate"}
+          </button>
+        </div>
+
+        {/* AUTOCOMPLETE */}
         {suggestions.length > 0 && (
           <div className="border border-border p-2 bg-surface rounded mt-1">
             {suggestions.map((s) => (
@@ -198,18 +188,11 @@ export default function Step3ExperimentalMethods() {
             ))}
           </div>
         )}
-
-        <button className="btn mt-2" onClick={handleValidate} disabled={loading}>
-          {loading ? "Validating..." : "Validate"}
-        </button>
       </div>
 
-      {msg && <p className="text-blue-300">{msg}</p>}
-
-      {/* EXISTS IN DB */}
+      {/* Existing ECO */}
       {validatedEco && existsInDB === true && (
         <div className="p-4 bg-surface border border-border rounded">
-          <p>This ECO already exists in the database.</p>
           <p><strong>{ecoName}</strong></p>
           <button className="btn mt-2" onClick={handleAddExisting}>
             Add to curation
@@ -217,10 +200,12 @@ export default function Step3ExperimentalMethods() {
         </div>
       )}
 
-      {/* CREATE NEW */}
+      {/* New ECO creation */}
       {validatedEco && existsInDB === false && (
         <div className="p-4 bg-surface border border-border rounded space-y-3">
-          <h3 className="text-lg font-semibold">Create new experimental technique</h3>
+          <h3 className="text-lg font-semibold">
+            Create new experimental technique
+          </h3>
 
           <p><strong>{ecoName}</strong> ({validatedEco})</p>
 
@@ -255,12 +240,17 @@ export default function Step3ExperimentalMethods() {
         </div>
       )}
 
+      {/* LIST */}
       <div>
         <h3 className="font-semibold mt-4">Added techniques:</h3>
         {techniques.length === 0 && <p>None yet.</p>}
         <ul className="list-disc pl-6">
           {techniques.map((t, i) => (
-            <li key={i}>{t}</li>
+            <li key={i}>
+              {typeof t === "string"
+                ? t
+                : `${t.eco} — ${t.name}`}
+            </li>
           ))}
         </ul>
       </div>
