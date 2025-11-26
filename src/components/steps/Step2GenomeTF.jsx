@@ -1,51 +1,53 @@
 import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
-import { dispatchWorkflow } from "../../utils/serverless";
 import { useCuration } from "../../context/CurationContext";
 
 export default function Step2GenomeTF() {
   const { setTf, goToNextStep } = useCuration();
 
-  const [tfName, setTfName] = useState("");
-  const [tfRow, setTfRow] = useState(null);
+  // STATES
+  const [searchName, setSearchName] = useState("");        // TF search input
+  const [suggestions, setSuggestions] = useState([]);      // autocomplete
 
-  const [families, setFamilies] = useState([]);
+  const [tfRow, setTfRow] = useState(null);                // existing TF
+  const [showCreateForm, setShowCreateForm] = useState(false);
+
+  const [newTFName, setNewTFName] = useState("");          // TF creation field
+  const [tfDesc, setTfDesc] = useState("");                // TF desc
+
+  const [families, setFamilies] = useState([]);            // family list
   const [selectedFamily, setSelectedFamily] = useState("");
   const [newFamilyName, setNewFamilyName] = useState("");
   const [newFamilyDesc, setNewFamilyDesc] = useState("");
-  const [tfDesc, setTfDesc] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  const [showCreateForm, setShowCreateForm] = useState(false);
-
-  // For autocomplete
-  const [suggestions, setSuggestions] = useState([]);
-
-  // Load families
-  useEffect(() => {
-    async function load() {
-      const rows = await runQuery(`
-        SELECT tf_family_id, name, description
-        FROM core_tffamily
-        ORDER BY name ASC
-      `);
-      setFamilies(rows);
-    }
-    load();
-  }, []);
-
-  // Escape helper
+  // escape SQL
   function esc(str) {
     return String(str || "").replace(/'/g, "''");
   }
 
-  // AUTOCOMPLETE TF SEARCH
-  async function handleAutocomplete(name) {
-    setTfName(name);
+  // LOAD FAMILY LIST
+  useEffect(() => {
+    async function loadFamilies() {
+      const rows = await runQuery(`
+        SELECT tf_family_id, name, description
+        FROM core_tffamily
+        ORDER BY name ASC;
+      `);
+      setFamilies(rows);
+    }
+    loadFamilies();
+  }, []);
 
-    if (name.length < 1) {
+  // AUTOCOMPLETE ON SEARCH INPUT
+  async function handleAutocomplete(value) {
+    setSearchName(value);
+    setTfRow(null);
+    setShowCreateForm(false);
+
+    if (!value || value.length < 1) {
       setSuggestions([]);
       return;
     }
@@ -56,24 +58,25 @@ export default function Step2GenomeTF() {
       FROM core_tf tf
       LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id
       WHERE LOWER(tf.name) LIKE LOWER(? || '%')
-      ORDER BY tf.name ASC
+      ORDER BY tf.name ASC;
       `,
-      [name]
+      [value]
     );
 
     setSuggestions(rows);
   }
 
-  // SEARCH TF (exact match)
+  // SEARCH BUTTON → EXACT MATCH
   async function handleSearchTF() {
     setMessage("");
     setTfRow(null);
+    setShowCreateForm(false);
+    setSuggestions([]);
 
-    const name = tfName.trim();
+    const name = searchName.trim();
     if (!name) return;
 
     setLoading(true);
-
     try {
       const rows = await runQuery(
         `
@@ -83,19 +86,18 @@ export default function Step2GenomeTF() {
         FROM core_tf tf
         LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id
         WHERE LOWER(tf.name) = LOWER(?)
-        LIMIT 1
+        LIMIT 1;
         `,
         [name]
       );
 
       if (rows.length) {
         setTfRow(rows[0]);
-        setShowCreateForm(false);
         setMessage("TF found in the database.");
       } else {
-        setTfRow(null);
-        setShowCreateForm(true);
         setMessage("TF not found. You can create it.");
+        setShowCreateForm(true);
+        setNewTFName(searchName);
       }
     } catch (err) {
       console.error(err);
@@ -105,21 +107,21 @@ export default function Step2GenomeTF() {
     }
   }
 
-  // CREATE NEW TF
+  // CREATE NEW TF (DEPLOY DISABLED)
   async function handleCreateTF() {
     setMessage("");
 
-    if (!tfName.trim()) {
-      setMessage("Please enter a TF name.");
+    if (!newTFName.trim()) {
+      setMessage("Please enter a name for the TF.");
       return;
     }
 
     const queries = [];
 
-    // Create new family if needed
+    // NEW FAMILY
     if (selectedFamily === "new") {
       if (!newFamilyName.trim()) {
-        setMessage("Please enter a name for the new family.");
+        setMessage("Please provide a name for the new family.");
         return;
       }
 
@@ -131,11 +133,12 @@ export default function Step2GenomeTF() {
       queries.push(`
         INSERT INTO core_tf (name, family_id, description)
         VALUES (
-          '${esc(tfName)}',
+          '${esc(newTFName)}',
           (SELECT tf_family_id FROM core_tffamily WHERE name='${esc(newFamilyName)}'),
           '${esc(tfDesc)}'
         );
       `);
+
     } else {
       const famId = Number(selectedFamily);
       if (!famId) {
@@ -145,71 +148,50 @@ export default function Step2GenomeTF() {
 
       queries.push(`
         INSERT INTO core_tf (name, family_id, description)
-        VALUES ('${esc(tfName)}', ${famId}, '${esc(tfDesc)}');
+        VALUES ('${esc(newTFName)}', ${famId}, '${esc(tfDesc)}');
       `);
     }
 
     const sqlFinal = queries.join("\n");
 
-    try {
-      await dispatchWorkflow({ inputs: { queries: sqlFinal } });
+    // ---------------------
+    // DEPLOY DISABLED HERE
+    // ---------------------
+    console.log("SQL stored for Step7:", sqlFinal);
+    setMessage("TF creation registered. It will be submitted at Step 7.");
 
-      setMessage("Request sent. The database will update after redeploy.");
+    // Register TF locally to go to next step
+    const famName =
+      selectedFamily === "new"
+        ? newFamilyName
+        : families.find((f) => f.tf_family_id == selectedFamily)?.name;
 
-      // Store TF in context
-      const famName =
-        selectedFamily === "new"
-          ? newFamilyName
-          : families.find((f) => f.tf_family_id == selectedFamily)?.name;
+    setTf({
+      name: newTFName,
+      family: famName,
+      description: tfDesc,
+    });
 
-      setTf({
-        name: tfName,
-        family: famName,
-        description: tfDesc,
-      });
-
-      goToNextStep();
-    } catch (err) {
-      console.error(err);
-      setMessage("Error sending queries.");
-    }
+    goToNextStep();
   }
 
+  // RENDER
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Step 2 – Genome & TF</h2>
 
-      {/* TF INPUT + AUTOCOMPLETE */}
+      {/* TF SEARCH FIELD */}
       <div className="space-y-2">
         <label className="block font-medium">TF Name</label>
 
-        <input
-          className="form-control"
-          value={tfName}
-          placeholder="Example: LexA"
-          onChange={(e) => handleAutocomplete(e.target.value)}
-        />
-
-        {/* AUTOCOMPLETE DROPDOWN */}
-        {suggestions.length > 0 && (
-          <div className="border border-border rounded bg-surface p-2">
-            {suggestions.map((s) => (
-              <div
-                key={s.TF_id}
-                className="p-1 hover:bg-muted cursor-pointer"
-                onClick={() => {
-                  setTfName(s.name);
-                  setSuggestions([]);
-                  handleSearchTF();
-                }}
-              >
-                {s.name} ({s.family_name})
-              </div>
-            ))}
-          </div>
-        )}
-
         <div className="flex gap-2">
+          <input
+            className="form-control flex-1"
+            value={searchName}
+            placeholder="Example: LexA"
+            onChange={(e) => handleAutocomplete(e.target.value)}
+          />
+
           <button className="btn" onClick={handleSearchTF} disabled={loading}>
             {loading ? "Searching..." : "Search"}
           </button>
@@ -219,16 +201,37 @@ export default function Step2GenomeTF() {
             onClick={() => {
               setShowCreateForm(true);
               setTfRow(null);
+              setSuggestions([]);
+              setNewTFName(searchName);
             }}
           >
             + Add TF
           </button>
         </div>
+
+        {/* AUTOCOMPLETE DROPDOWN */}
+        {suggestions.length > 0 && (
+          <div className="border border-border rounded bg-surface p-2">
+            {suggestions.map((s) => (
+              <div
+                key={s.TF_id}
+                className="p-1 hover:bg-muted cursor-pointer"
+                onClick={() => {
+                  setSearchName(s.name);
+                  setSuggestions([]);
+                  handleSearchTF();
+                }}
+              >
+                {s.name} ({s.family_name})
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {message && <p className="text-blue-300">{message}</p>}
 
-      {/*EXISTING TF FOUND*/}
+      {/*EXISTING TF DISPLAY*/}
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
@@ -236,7 +239,6 @@ export default function Step2GenomeTF() {
           <p><strong>ID:</strong> {tfRow.TF_id}</p>
           <p><strong>Family:</strong> {tfRow.family_name}</p>
 
-          {/* Show both descriptions */}
           <p><strong>TF Description:</strong> {tfRow.description || "—"}</p>
           <p><strong>Family Description:</strong> {tfRow.family_description || "—"}</p>
 
@@ -252,7 +254,7 @@ export default function Step2GenomeTF() {
         </div>
       )}
 
-      {/*CREATE NEW TF*/}
+      {/*CREATE NEW TF FORM*/}
       {showCreateForm && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Create New TF</h3>
@@ -261,8 +263,8 @@ export default function Step2GenomeTF() {
             <label className="block font-medium">TF Name</label>
             <input
               className="form-control"
-              value={tfName}
-              onChange={(e) => setTfName(e.target.value)}
+              value={newTFName}
+              onChange={(e) => setNewTFName(e.target.value)}
             />
           </div>
 
@@ -284,6 +286,7 @@ export default function Step2GenomeTF() {
             </select>
           </div>
 
+          {/* NEW FAMILY FIELDS */}
           {selectedFamily === "new" && (
             <>
               <div>
