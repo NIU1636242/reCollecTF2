@@ -1,35 +1,30 @@
 import { useState, useEffect } from "react";
-import { runQuery } from "../../db/queryExecutor";
-import { useCuration } from "../../context/CurationContext";
+import { runQuery } from "../../db/queryExecutor"; //Executa SQL a la base de dades
+import { useCuration } from "../../context/CurationContext"; //Permet llegir o modificar el que està guardat a CurationContext
 
 export default function Step3ExperimentalMethods() {
   const { techniques, setTechniques, goToNextStep } = useCuration();
 
-  const [ecoInput, setEcoInput] = useState("");
+  const [ecoInput, setEcoInput] = useState(""); 
   const [validatedEco, setValidatedEco] = useState(null);
   const [ecoName, setEcoName] = useState("");
   const [existsInDB, setExistsInDB] = useState(null);
 
+  //Per a crear un nou ECO (categoría i nova descripció)
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [techDescription, setTechDescription] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
+  const [suggestions, setSuggestions] = useState([]); //Per a la llista d'autocompletat
 
-  /** Escape SQL */
-  function esc(str) {
+  function esc(str) { //Evita error als strings amb les cometes simples
     return String(str || "").replace(/'/g, "''");
   }
 
-  /** Restore state when coming back */
+  // Carregar technique categories
   useEffect(() => {
-    // techniques already stored automatically — nothing else needed
-  }, []);
-
-  /** Load technique categories */
-  useEffect(() => {
-    async function fetchCategories() {
+    async function fetchCategories() { 
       const rows = await runQuery(`
         SELECT category_id, name
         FROM core_experimentaltechniquecategory
@@ -40,7 +35,7 @@ export default function Step3ExperimentalMethods() {
     fetchCategories();
   }, []);
 
-  /** Autocomplete (name or ECO code) */
+  //Autocompletar (nom o ECO code)
   async function handleAutocomplete(val) {
     setEcoInput(val);
     setValidatedEco(null);
@@ -65,7 +60,7 @@ export default function Step3ExperimentalMethods() {
     setSuggestions(rows);
   }
 
-  /** QuickGO validation */
+  //QuickGO validation
   async function validateEcoAPI(code) {
     try {
       const res = await fetch(
@@ -74,20 +69,20 @@ export default function Step3ExperimentalMethods() {
       );
       if (!res.ok) return null;
 
-      const json = await res.json();
+      const json = await res.json(); //Convertim a json la resposta, on s'indica id, nom, definició...
       return json.results?.length > 0 ? json.results[0] : null;
     } catch {
       return null;
     }
   }
 
-  /** Validate ECO button */
+  //Botó Validate ECO
   async function handleValidate() {
     setLoading(true);
     setValidatedEco(null);
     setExistsInDB(null);
 
-    let raw = ecoInput.trim().toUpperCase();
+    let raw = ecoInput.trim().toUpperCase(); //Completem els ECO a majúscules, amb els dos punts i tot el necessari
     if (!raw.startsWith("ECO:")) raw = "ECO:" + raw;
 
     try {
@@ -100,7 +95,7 @@ export default function Step3ExperimentalMethods() {
       setValidatedEco(raw);
       setEcoName(ecoObj.name);
 
-      // check DB existence
+      //Veure si ja existeix a la base de dades
       const rows = await runQuery(
         `SELECT * FROM core_experimentaltechnique WHERE EO_term = ?`,
         [raw]
@@ -112,14 +107,14 @@ export default function Step3ExperimentalMethods() {
     }
   }
 
-  /** Add existing ECO from DB */
+  //Quan es clica a Add to Curation i el ECO ja exisitia a la base de dades
   function handleAddExisting() {
     setTechniques([...techniques, validatedEco]);
-    setValidatedEco(null);
-    setEcoInput("");
+    setValidatedEco(null); //Evita crear 2 cops el mateix codi a la DB
+    setEcoInput(""); //El input es buida
   }
 
-  /** Create new ECO (saved only for step7 deploy) */
+  //Creem el nou codi ECO per a fer el deploy al step7
   async function handleCreateEco() {
     const sql = `
       INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
@@ -160,7 +155,7 @@ export default function Step3ExperimentalMethods() {
           </button>
         </div>
 
-        {/* AUTOCOMPLETE */}
+        {/* Autocompletar */}
         {suggestions.length > 0 && (
           <div className="border border-border p-2 bg-surface rounded mt-1">
             {suggestions.map((s) => (
@@ -189,7 +184,7 @@ export default function Step3ExperimentalMethods() {
         </div>
       )}
 
-      {/* New ECO creation */}
+      {/* Crear nou ECO */}
       {validatedEco && existsInDB === false && (
         <div className="p-4 bg-surface border border-border rounded space-y-3">
           <h3 className="text-lg font-semibold">
@@ -229,7 +224,7 @@ export default function Step3ExperimentalMethods() {
         </div>
       )}
 
-      {/* LIST */}
+      {/* Llista */}
       <div>
         <h3 className="font-semibold mt-4">Added techniques:</h3>
         {techniques.length === 0 && <p>None yet.</p>}
