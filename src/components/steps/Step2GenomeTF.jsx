@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
 import { useCuration } from "../../context/CurationContext";
 
-// Proxy i bases per a les APIs externes
 const PROXY = "https://corsproxy.io/?";
 const ENTREZ_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb";
@@ -22,114 +21,107 @@ export default function Step2GenomeTF() {
     goToNextStep,
   } = useCuration();
 
-  // ---------------- TF NAME ----------------
-  const [searchName, setSearchName] = useState(""); // TF search input
-  const [suggestions, setSuggestions] = useState([]); // autocomplete
+  // ---------------- TF ----------------
+  const [searchName, setSearchName] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
 
-  const [tfRow, setTfRow] = useState(null); // existing TF
+  const [tfRow, setTfRow] = useState(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
-  const [newTFName, setNewTFName] = useState(""); // TF creation field
-  const [tfDesc, setTfDesc] = useState(""); // TF desc
+  const [newTFName, setNewTFName] = useState("");
+  const [tfDesc, setTfDesc] = useState("");
 
-  const [families, setFamilies] = useState([]); // family list
+  const [families, setFamilies] = useState([]);
   const [selectedFamily, setSelectedFamily] = useState("");
   const [showNewFamilyForm, setShowNewFamilyForm] = useState(false);
   const [newFamilyName, setNewFamilyName] = useState("");
   const [newFamilyDesc, setNewFamilyDesc] = useState("");
 
-  const [message, setMessage] = useState("");
+  const [finalError, setFinalError] = useState("");
 
-  // ---------------- GENOME ACCESSIONS ----------------
+  // ---------------- Genome ----------------
   const [genomeInput, setGenomeInput] = useState("");
   const [genomeSuggestions, setGenomeSuggestions] = useState([]);
-  const [genomeItems, setGenomeItems] = useState([]); // [{accession, description, organism, existsInDB}]
+  const [genomeItems, setGenomeItems] = useState([]);
 
-  // ---------------- UNIPROT ACCESSIONS ----------------
+  // ---------------- UniProt ----------------
   const [uniprotInput, setUniprotInput] = useState("");
   const [uniprotSuggestions, setUniprotSuggestions] = useState([]);
-  const [uniProtItems, setUniProtItems] = useState([]); // [{accession, description, organism, existsInDB, linkedRefseq}]
+  const [uniProtItems, setUniProtItems] = useState([]);
 
-  // ---------------- REFSEQ (NCBI PROTEIN) ACCESSIONS ----------------
+  // ---------------- RefSeq ----------------
   const [refseqInput, setRefseqInput] = useState("");
   const [refseqSuggestions, setRefseqSuggestions] = useState([]);
-  const [refseqItems, setRefseqItems] = useState([]); // [{accession, description, organism, existsInDB}]
+  const [refseqItems, setRefseqItems] = useState([]);
 
-  // ---------------- CHECKBOXES & ORGANISM TEXTS ----------------
+  // ---------------- Checkboxes + extra fields ----------------
   const [sameStrainGenome, setSameStrainGenome] = useState(false);
-  const [sameStrainTF, setSameStrainTF] = useState(false);
   const [bindingOrganism, setBindingOrganism] = useState("");
+
+  const [sameStrainTF, setSameStrainTF] = useState(false);
   const [reportedTFOrganism, setReportedTFOrganism] = useState("");
+
   const [promoterInfo, setPromoterInfo] = useState(false);
   const [expressionInfo, setExpressionInfo] = useState(false);
 
-  // escape SQL
-  function esc(str) {
-    return String(str || "").replace(/'/g, "''");
+  // Escape SQL
+  function esc(s) {
+    return String(s || "").replace(/'/g, "''");
   }
 
-  // ---------------- RESTAURAR DEL CONTEXT ----------------
+  // ---------------- RESTORE FROM CONTEXT ----------------
   useEffect(() => {
-    // TF
     if (tf) {
       if (tf.TF_id) {
         setTfRow(tf);
-        setSearchName(tf.name || "");
+        setSearchName(tf.name);
       } else {
-        // TF creat manualment
         setShowCreateForm(true);
         setNewTFName(tf.name || "");
-        setSelectedFamily(tf.family_id || "");
         setTfDesc(tf.description || "");
+        setSelectedFamily(tf.family_id || "");
+        setShowNewFamilyForm(tf.isNewFamily || false);
+        setNewFamilyName(tf.family || "");
+        setNewFamilyDesc(tf.family_description || "");
       }
     }
+    if (genomeList?.length) setGenomeItems(genomeList);
+    if (uniprotList?.length) setUniProtItems(uniprotList);
+    if (refseqList?.length) setRefseqItems(refseqList);
 
-    // genomes / proteins
-    if (genomeList && genomeList.length > 0) {
-      setGenomeItems(genomeList);
-    }
-    if (uniprotList && uniprotList.length > 0) {
-      setUniProtItems(uniprotList);
-    }
-    if (refseqList && refseqList.length > 0) {
-      setRefseqItems(refseqList);
-    }
-
-    // strain / organism info
     if (strainData) {
       setSameStrainGenome(strainData.sameStrainGenome || false);
-      setSameStrainTF(strainData.sameStrainTF || false);
       setBindingOrganism(strainData.organismTFBindingSites || "");
+
+      setSameStrainTF(strainData.sameStrainTF || false);
       setReportedTFOrganism(strainData.organismReportedTF || "");
+
       setPromoterInfo(strainData.promoterInfo || false);
       setExpressionInfo(strainData.expressionInfo || false);
     }
-  }, []); // només en muntar
+  }, []);
 
-  // ---------------- CARREGAR FAMÍLIES ----------------
+  // ---------------- LOAD FAMILIES ----------------
   useEffect(() => {
     async function loadFamilies() {
       const rows = await runQuery(`
         SELECT tf_family_id, name, description
-        FROM core_tffamily
-        ORDER BY name ASC;
+        FROM core_tffamily ORDER BY name ASC
       `);
       setFamilies(rows);
     }
     loadFamilies();
   }, []);
 
-  // ====================================================
-  // TF NAME: AUTOCOMPLETE + LOOKUP
-  // ====================================================
-
-  async function handleAutocompleteTF(value) {
-    setSearchName(value);
+  // ============================================================
+  // TF AUTOCOMPLETE
+  // ============================================================
+  async function handleAutocompleteTF(val) {
+    setSearchName(val);
     setTfRow(null);
     setShowCreateForm(false);
-    setMessage("");
 
-    if (!value || value.length < 1) {
+    if (!val || val.length < 1) {
       setSuggestions([]);
       return;
     }
@@ -140,131 +132,91 @@ export default function Step2GenomeTF() {
       FROM core_tf tf
       LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id
       WHERE LOWER(tf.name) LIKE LOWER(? || '%')
-      ORDER BY tf.name ASC;
+      ORDER BY tf.name ASC
       `,
-      [value]
+      [val]
     );
 
     setSuggestions(rows);
   }
 
-  // Busca TF exacte i mostra info
-  async function handleSearchTF(nameOverride) {
-    setMessage("");
-    setTfRow(null);
-    setShowCreateForm(false);
-
-    const name = (nameOverride ?? searchName).trim();
-    if (!name) return;
-
-    try {
-      const rows = await runQuery(
-        `
-        SELECT tf.*, 
-               fam.name AS family_name,
-               fam.description AS family_description
-        FROM core_tf tf
-        LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id
-        WHERE LOWER(tf.name) = LOWER(?)
-        LIMIT 1;
+  // ============================================================
+  // When selecting from autocomplete → load full TF
+  // ============================================================
+  async function loadTF(name) {
+    const rows = await runQuery(
+      `
+      SELECT tf.*, fam.name AS family_name, fam.description AS family_description
+      FROM core_tf tf
+      LEFT JOIN core_tffamily fam ON fam.tf_family_id = tf.family_id
+      WHERE LOWER(tf.name) = LOWER(?)
+      LIMIT 1
       `,
-        [name]
-      );
+      [name]
+    );
 
-      if (rows.length) {
-        const row = rows[0];
-        setTfRow(row);
-        setTf(row); // guardem TF al context per al Summary
-      } else {
-        setMessage("TF not found. You can create it.");
-        setShowCreateForm(true);
-        setNewTFName(name);
-        setTf(null);
-      }
-    } catch (err) {
-      console.error(err);
-      setMessage("Database error.");
+    if (rows.length) {
+      setTfRow(rows[0]);
+      setTf(rows[0]); // save to context
+      setShowCreateForm(false);
+    } else {
+      setTfRow(null);
+      setShowCreateForm(true);
+      setNewTFName(name);
     }
   }
 
-  // ====================================================
-  // CREAR NOU TF (sense deploy encara)
-  // ====================================================
-
-  async function handleCreateTF() {
-    setMessage("");
+  // ============================================================
+  // CREATE NEW TF (NO DEPLOY YET)
+  // ============================================================
+  function saveNewTF() {
+    setFinalError("");
 
     if (!newTFName.trim()) {
-      setMessage("Please enter a name for the TF.");
+      setFinalError("Please enter a TF name.");
       return;
     }
 
-    const isNewFamily = showNewFamilyForm && newFamilyName.trim();
-    const famId = selectedFamily ? Number(selectedFamily) : null;
+    let familyName = "";
+    let familyId = null;
 
-    if (!isNewFamily && !famId) {
-      setMessage("Please select a family or create a new one.");
-      return;
-    }
-
-    const queries = [];
-
-    if (isNewFamily) {
-      // INSERT nova família
-      queries.push(`
-        INSERT INTO core_tffamily (name, description)
-        VALUES ('${esc(newFamilyName)}', '${esc(newFamilyDesc)}');
-      `);
-
-      // INSERT TF lligat a la nova família
-      queries.push(`
-        INSERT INTO core_tf (name, family_id, description)
-        VALUES (
-          '${esc(newTFName)}',
-          (SELECT tf_family_id FROM core_tffamily WHERE name='${esc(
-            newFamilyName
-          )}'),
-          '${esc(tfDesc)}'
-        );
-      `);
+    if (showNewFamilyForm) {
+      if (!newFamilyName.trim()) {
+        setFinalError("Please enter the new family name.");
+        return;
+      }
+      familyName = newFamilyName;
     } else {
-      queries.push(`
-        INSERT INTO core_tf (name, family_id, description)
-        VALUES ('${esc(newTFName)}', ${famId}, '${esc(tfDesc)}');
-      `);
+      if (!selectedFamily) {
+        setFinalError("Please select a family.");
+        return;
+      }
+      const fam = families.find((f) => f.tf_family_id == selectedFamily);
+      familyName = fam?.name || "";
+      familyId = fam?.tf_family_id || null;
     }
 
-    const sqlFinal = queries.join("\n");
-    // Aquí es on en el futur es farà el deploy al Step7
-    // await dispatchWorkflow({ inputs: { queries: sqlFinal } });
-
-    const famName = isNewFamily
-      ? newFamilyName
-      : families.find((f) => f.tf_family_id == famId)?.name;
-
-    // Guardem al context un objecte TF "nou"
-    const newTfObj = {
+    const newObj = {
       name: newTFName,
-      family: famName,
-      family_id: famId || null,
       description: tfDesc,
+      family: familyName,
+      family_id: familyId,
       isNew: true,
-      sql: sqlFinal, // perquè Step7 pugui executar-ho
+      isNewFamily: showNewFamilyForm,
+      newFamilyName,
+      newFamilyDesc,
     };
 
-    setTf(newTfObj);
+    setTf(newObj);
     setTfRow(null);
-
-    setMessage("New TF registered locally. It will be created at Step 7.");
+    setShowCreateForm(false);
   }
 
-  // ====================================================
-  // GENOME: AUTOCOMPLETE + VALIDADOR ENTrez
-  // ====================================================
-
+  // ============================================================
+  // GENOME AUTOCOMPLETE + VALIDATION
+  // ============================================================
   async function handleAutocompleteGenome(val) {
     setGenomeInput(val);
-
     if (!val || val.length < 1) {
       setGenomeSuggestions([]);
       return;
@@ -275,39 +227,34 @@ export default function Step2GenomeTF() {
       SELECT genome_id, genome_accession, organism
       FROM core_genome
       WHERE genome_accession LIKE ? || '%'
-      ORDER BY genome_accession ASC;
-    `,
+      ORDER BY genome_accession ASC
+      `,
       [val]
     );
-
     setGenomeSuggestions(rows);
   }
 
-  async function fetchNuccoreSummary(accession) {
-    const esearchUrl = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(
-      accession
+  async function fetchNuccoreSummary(acc) {
+    const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(
+      acc
     )}[accn]`;
-    const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
+    const r1 = await fetch(PROXY + encodeURIComponent(url1));
     const j1 = await r1.json();
     const uid = j1.esearchresult?.idlist?.[0];
     if (!uid) return null;
 
-    const esumUrl = `${ENTREZ_BASE}/esummary.fcgi?db=nuccore&id=${uid}&retmode=json`;
-    const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
+    const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=nuccore&id=${uid}&retmode=json`;
+    const r2 = await fetch(PROXY + encodeURIComponent(url2));
     const j2 = await r2.json();
     const rec = j2.result?.[uid];
     if (!rec) return null;
 
-    return {
-      title: rec.title,
-      organism: rec.organism,
-    };
+    return { title: rec.title, organism: rec.organism };
   }
 
   async function handleAddGenome() {
     const acc = genomeInput.trim();
     if (!acc) return;
-
     if (genomeItems.some((g) => g.accession === acc)) {
       setGenomeInput("");
       return;
@@ -318,8 +265,8 @@ export default function Step2GenomeTF() {
       SELECT genome_id, genome_accession, organism
       FROM core_genome
       WHERE genome_accession = ?
-      LIMIT 1;
-    `,
+      LIMIT 1
+      `,
       [acc]
     );
 
@@ -341,35 +288,30 @@ export default function Step2GenomeTF() {
       return;
     }
 
-    try {
-      const info = await fetchNuccoreSummary(acc);
-      if (!info) return;
+    const info = await fetchNuccoreSummary(acc);
+    if (!info) return;
 
-      const updated = [
-        ...genomeItems,
-        {
-          accession: acc,
-          description: info.title,
-          organism: info.organism,
-          existsInDB: false,
-        },
-      ];
-      setGenomeItems(updated);
-      setGenomeList(updated);
-      setGenomeInput("");
-      setGenomeSuggestions([]);
-    } catch (err) {
-      console.error(err);
-    }
+    const updated = [
+      ...genomeItems,
+      {
+        accession: acc,
+        description: info.title,
+        organism: info.organism,
+        existsInDB: false,
+      },
+    ];
+    setGenomeItems(updated);
+    setGenomeList(updated);
+
+    setGenomeInput("");
+    setGenomeSuggestions([]);
   }
 
-  // ====================================================
-  // UNIPROT: AUTOCOMPLETE + VALIDACIÓ UNIPROT
-  // ====================================================
-
+  // ============================================================
+  // UNIPROT AUTOCOMPLETE + VALIDATION
+  // ============================================================
   async function handleAutocompleteUniprot(val) {
     setUniprotInput(val);
-
     if (!val || val.length < 1) {
       setUniprotSuggestions([]);
       return;
@@ -380,90 +322,77 @@ export default function Step2GenomeTF() {
       SELECT TF_instance_id, uniprot_accession, refseq_accession, description
       FROM core_tfinstance
       WHERE uniprot_accession LIKE ? || '%'
-      ORDER BY uniprot_accession ASC;
-    `,
+      ORDER BY uniprot_accession ASC
+      `,
       [val]
     );
-
     setUniprotSuggestions(rows);
   }
 
   async function fetchUniprotSummary(acc) {
-    try {
-      const url = `${UNIPROT_BASE}/${encodeURIComponent(acc)}.json`;
-      const res = await fetch(PROXY + encodeURIComponent(url));
-      if (!res.ok) return null;
-      const json = await res.json();
+    const url = `${UNIPROT_BASE}/${encodeURIComponent(acc)}.json`;
+    const r = await fetch(PROXY + encodeURIComponent(url));
+    if (!r.ok) return null;
+    const j = await r.json();
 
-      const recName =
-        json.proteinDescription?.recommendedName?.fullName?.value ||
-        json.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
-        "";
-      const organism = json.organism?.scientificName || "";
+    const name =
+      j.proteinDescription?.recommendedName?.fullName?.value ||
+      j.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
+      "";
 
-      return {
-        title: recName || json.id || acc,
-        organism,
-      };
-    } catch {
-      return null;
-    }
+    return {
+      title: name || j.id || acc,
+      organism: j.organism?.scientificName || "",
+    };
   }
 
   async function handleAddUniprot() {
     const acc = uniprotInput.trim();
     if (!acc) return;
-
-    if (uniProtItems.some((u) => u.accession === acc)) {
+    if (uniProtItems.some((i) => i.accession === acc)) {
       setUniprotInput("");
       return;
     }
 
-    // 1) DB
     const rows = await runQuery(
       `
       SELECT TF_instance_id, uniprot_accession, refseq_accession, description
       FROM core_tfinstance
       WHERE uniprot_accession = ?
-      LIMIT 1;
-    `,
+      LIMIT 1
+      `,
       [acc]
     );
 
     if (rows.length) {
-      const row = rows[0];
+      const r = rows[0];
 
       const updatedUni = [
         ...uniProtItems,
         {
-          accession: row.uniprot_accession,
-          description: row.description || "",
-          organism: "",
+          accession: r.uniprot_accession,
+          description: r.description || "",
           existsInDB: true,
-          linkedRefseq: row.refseq_accession || null,
+          linkedRefseq: r.refseq_accession || null,
         },
       ];
       setUniProtItems(updatedUni);
       setUniprotList(updatedUni);
 
-      // Si té RefSeq associat, l'afegim
-      if (row.refseq_accession) {
-        if (!refseqItems.some((r) => r.accession === row.refseq_accession)) {
+      if (r.refseq_accession) {
+        if (!refseqItems.some((x) => x.accession === r.refseq_accession)) {
           const updatedRef = [
             ...refseqItems,
             {
-              accession: row.refseq_accession,
-              description: row.description || "",
-              organism: "",
+              accession: r.refseq_accession,
+              description: r.description || "",
               existsInDB: true,
             },
           ];
           setRefseqItems(updatedRef);
           setRefseqList(updatedRef);
         }
-        if (!refseqInput) {
-          setRefseqInput(row.refseq_accession);
-        }
+        // NO rellenar el input → FIX pedido
       }
 
       setUniprotInput("");
@@ -471,7 +400,6 @@ export default function Step2GenomeTF() {
       return;
     }
 
-    // 2) UniProt API
     const info = await fetchUniprotSummary(acc);
     if (!info) return;
 
@@ -480,24 +408,22 @@ export default function Step2GenomeTF() {
       {
         accession: acc,
         description: info.title,
-        organism: info.organism,
         existsInDB: false,
         linkedRefseq: null,
       },
     ];
     setUniProtItems(updated);
     setUniprotList(updated);
+
     setUniprotInput("");
     setUniprotSuggestions([]);
   }
 
-  // ====================================================
-  // REFSEQ: AUTOCOMPLETE + ENTrez protein
-  // ====================================================
-
+  // ============================================================
+  // REFSEQ AUTOCOMPLETE + VALIDATION
+  // ============================================================
   async function handleAutocompleteRefseq(val) {
     setRefseqInput(val);
-
     if (!val || val.length < 1) {
       setRefseqSuggestions([]);
       return;
@@ -508,39 +434,34 @@ export default function Step2GenomeTF() {
       SELECT TF_instance_id, refseq_accession, description
       FROM core_tfinstance
       WHERE refseq_accession LIKE ? || '%'
-      ORDER BY refseq_accession ASC;
-    `,
+      ORDER BY refseq_accession ASC
+      `,
       [val]
     );
-
     setRefseqSuggestions(rows);
   }
 
-  async function fetchProteinSummary(accession) {
-    const esearchUrl = `${ENTREZ_BASE}/esearch.fcgi?db=protein&retmode=json&term=${encodeURIComponent(
-      accession
+  async function fetchProteinSummary(acc) {
+    const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=protein&retmode=json&term=${encodeURIComponent(
+      acc
     )}[accn]`;
-    const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
+    const r1 = await fetch(PROXY + encodeURIComponent(url1));
     const j1 = await r1.json();
     const uid = j1.esearchresult?.idlist?.[0];
     if (!uid) return null;
 
-    const esumUrl = `${ENTREZ_BASE}/esummary.fcgi?db=protein&id=${uid}&retmode=json`;
-    const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
+    const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=protein&id=${uid}&retmode=json`;
+    const r2 = await fetch(PROXY + encodeURIComponent(url2));
     const j2 = await r2.json();
     const rec = j2.result?.[uid];
-    if (!rec) return null;
 
-    return {
-      title: rec.title,
-    };
+    return rec ? { title: rec.title } : null;
   }
 
   async function handleAddRefseq() {
     const acc = refseqInput.trim();
     if (!acc) return;
-
-    if (refseqItems.some((r) => r.accession === acc)) {
+    if (refseqItems.some((i) => i.accession === acc)) {
       setRefseqInput("");
       return;
     }
@@ -550,24 +471,24 @@ export default function Step2GenomeTF() {
       SELECT TF_instance_id, refseq_accession, description
       FROM core_tfinstance
       WHERE refseq_accession = ?
-      LIMIT 1;
-    `,
+      LIMIT 1
+      `,
       [acc]
     );
 
     if (rows.length) {
-      const row = rows[0];
+      const r = rows[0];
       const updated = [
         ...refseqItems,
         {
-          accession: row.refseq_accession,
-          description: row.description || "",
-          organism: "",
+          accession: r.refseq_accession,
+          description: r.description || "",
           existsInDB: true,
         },
       ];
       setRefseqItems(updated);
       setRefseqList(updated);
+
       setRefseqInput("");
       setRefseqSuggestions([]);
       return;
@@ -576,65 +497,81 @@ export default function Step2GenomeTF() {
     const info = await fetchProteinSummary(acc);
     if (!info) return;
 
-    const updated2 = [
+    const updated = [
       ...refseqItems,
       {
         accession: acc,
         description: info.title,
-        organism: "",
         existsInDB: false,
       },
     ];
-    setRefseqItems(updated2);
-    setRefseqList(updated2);
+    setRefseqItems(updated);
+    setRefseqList(updated);
+
     setRefseqInput("");
     setRefseqSuggestions([]);
   }
 
-  // ====================================================
-  // CONFIRMAR I CONTINUAR (UN SOL BOTÓ AL FINAL)
-  // ====================================================
-
+  // ============================================================
+  // FINAL CONFIRM
+  // ============================================================
   function handleFinalConfirm() {
-    setMessage("");
+    setFinalError("");
 
     if (!tf) {
-      setMessage("Please select or create a TF before continuing.");
+      setFinalError("You must select or create a TF before continuing.");
       return;
     }
+
+    if (genomeItems.length === 0) {
+      setFinalError("Please add at least one genome accession.");
+      return;
+    }
+
+    if (!sameStrainGenome && !bindingOrganism.trim()) {
+      setFinalError(
+        "Please specify the organism where TF binding sites are reported."
+      );
+      return;
+    }
+
+    if (!sameStrainTF && !reportedTFOrganism.trim()) {
+      setFinalError("Please specify the organism of origin for the TF.");
+      return;
+    }
+
+    const strainObj = {
+      sameStrainGenome,
+      organismTFBindingSites: bindingOrganism,
+      sameStrainTF,
+      organismReportedTF: reportedTFOrganism,
+      promoterInfo,
+      expressionInfo,
+    };
 
     setGenomeList(genomeItems);
     setUniprotList(uniProtItems);
     setRefseqList(refseqItems);
-
-    setStrainData({
-      sameStrainGenome,
-      sameStrainTF,
-      organismTFBindingSites: bindingOrganism,
-      organismReportedTF: reportedTFOrganism,
-      promoterInfo,
-      expressionInfo,
-    });
+    setStrainData(strainObj);
 
     goToNextStep();
   }
 
-  // ====================================================
+  // ============================================================
   // RENDER
-  // ====================================================
-
+  // ============================================================
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <h2 className="text-2xl font-bold">Step 2 – Genome & TF</h2>
 
-      {/* TF SEARCH FIELD */}
+      {/* ---------------- TF NAME ---------------- */}
       <div className="space-y-2">
         <label className="block font-medium">TF Name</label>
 
         <input
-          className="form-control flex-1"
-          value={searchName}
+          className="form-control"
           placeholder="Example: LexA"
+          value={searchName}
           onChange={(e) => handleAutocompleteTF(e.target.value)}
         />
 
@@ -650,7 +587,6 @@ export default function Step2GenomeTF() {
           + Add TF
         </button>
 
-        {/* AUTOCOMPLETE DROPDOWN */}
         {suggestions.length > 0 && (
           <div className="border border-border rounded bg-surface p-2 mt-1">
             {suggestions.map((s) => (
@@ -658,10 +594,9 @@ export default function Step2GenomeTF() {
                 key={s.TF_id}
                 className="p-1 hover:bg-muted cursor-pointer"
                 onClick={() => {
-                  const name = s.name;
-                  setSearchName(name);
+                  setSearchName(s.name);
                   setSuggestions([]);
-                  handleSearchTF(name);
+                  loadTF(s.name);
                 }}
               >
                 {s.name} ({s.family_name})
@@ -671,20 +606,16 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {message && <p className="text-blue-300">{message}</p>}
-
-      {/* EXISTING TF DISPLAY */}
+      {/* ---------------- EXISTING TF ---------------- */}
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
-
           <p>
             <strong>ID:</strong> {tfRow.TF_id}
           </p>
           <p>
             <strong>Family:</strong> {tfRow.family_name}
           </p>
-
           <p>
             <strong>TF Description:</strong> {tfRow.description || "—"}
           </p>
@@ -695,7 +626,7 @@ export default function Step2GenomeTF() {
         </div>
       )}
 
-      {/* CREATE NEW TF FORM */}
+      {/* ---------------- CREATE TF ---------------- */}
       {showCreateForm && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Create New TF</h3>
@@ -714,7 +645,10 @@ export default function Step2GenomeTF() {
             <select
               className="form-control"
               value={selectedFamily}
-              onChange={(e) => setSelectedFamily(e.target.value)}
+              onChange={(e) => {
+                setSelectedFamily(e.target.value);
+                setShowNewFamilyForm(false);
+              }}
             >
               <option value="">Select a family...</option>
               {families.map((f) => (
@@ -727,13 +661,15 @@ export default function Step2GenomeTF() {
             <button
               type="button"
               className="btn mt-2"
-              onClick={() => setShowNewFamilyForm(true)}
+              onClick={() => {
+                setShowNewFamilyForm(true);
+                setSelectedFamily("");
+              }}
             >
               + Add New Family
             </button>
           </div>
 
-          {/* NEW FAMILY FIELDS */}
           {showNewFamilyForm && (
             <>
               <div>
@@ -765,49 +701,45 @@ export default function Step2GenomeTF() {
             />
           </div>
 
-          <button className="btn" onClick={handleCreateTF}>
-            Save TF (no deploy yet)
+          <button className="btn" onClick={saveNewTF}>
+            Save TF
           </button>
         </div>
       )}
 
-      {/* ======================== GENOME SECTION ======================== */}
+      {/* ---------------- GENOME ---------------- */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Genome NCBI accession number</h3>
         <p className="text-sm text-muted">
-          Paste the NCBI GenBank genome accession number for the species closest
-          to the reported species/strain (e.g. NC_000913.2). You can add more
-          than one chromosome.
+          Paste the NCBI GenBank genome accession for the closest species or
+          strain (e.g. NC_000913.2).
         </p>
 
         <div className="flex gap-2">
           <input
             className="form-control flex-1"
-            placeholder="Example: NC_000913.2"
             value={genomeInput}
             onChange={(e) => handleAutocompleteGenome(e.target.value)}
+            placeholder="NC_000913.2"
           />
           <button className="btn" onClick={handleAddGenome}>
             Add genome
           </button>
         </div>
 
-        {/* checkbox igual que CollectTF */}
-        <div className="mt-2 text-sm">
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={sameStrainGenome}
-              onChange={(e) => setSameStrainGenome(e.target.checked)}
-            />
-            <span>
-              This is the exact same strain as reported in the manuscript for
-              the sites.
-            </span>
-          </label>
-        </div>
+        {/* checkbox BEFORE the organism field */}
+        <label className="inline-flex items-center gap-2 text-sm mt-2">
+          <input
+            type="checkbox"
+            checked={sameStrainGenome}
+            onChange={(e) => setSameStrainGenome(e.target.checked)}
+          />
+          <span>
+            This is the exact same strain as reported in the manuscript for the
+            sites.
+          </span>
+        </label>
 
-        {/* autocomplete list */}
         {genomeSuggestions.length > 0 && (
           <div className="border border-border rounded bg-surface p-2 mt-1">
             {genomeSuggestions.map((g) => (
@@ -825,7 +757,6 @@ export default function Step2GenomeTF() {
           </div>
         )}
 
-        {/* lista de genomes añadidos */}
         {genomeItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
             {genomeItems.map((g, i) => (
@@ -837,42 +768,39 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* Organism TF binding sites are reported in */}
         {!sameStrainGenome && (
           <div className="mt-4 space-y-1">
             <label className="block font-medium text-sm">
               Organism TF binding sites are reported in
             </label>
+
             <textarea
               className="form-control"
               value={bindingOrganism}
               onChange={(e) => setBindingOrganism(e.target.value)}
               placeholder="Example: Pseudomonas putida plasmid pEST1226"
             />
+
             <p className="text-xs text-muted">
-              If the work you are reporting uses a strain different from the
-              selected RefSeq genome, please type/paste the original strain
-              here. This allows us to keep track of the correspondence between
-              reported and mapped strains.
+              Used when the reported strain differs from the genome strain.
             </p>
           </div>
         )}
       </div>
 
-      {/* ======================== UNIPROT SECTION ======================== */}
+      {/* ---------------- UNIPROT ---------------- */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF UniProt accession number</h3>
         <p className="text-sm text-muted">
-          Paste the NCBI TF protein accession number for the species closest to
-          the reported species/strain. You can add more than one TF.
+          Paste the UniProt accession for the TF (e.g. Q87KN2).
         </p>
 
         <div className="flex gap-2">
           <input
             className="form-control flex-1"
-            placeholder="Example: Q87KN2"
             value={uniprotInput}
             onChange={(e) => handleAutocompleteUniprot(e.target.value)}
+            placeholder="Q87KN2"
           />
           <button className="btn" onClick={handleAddUniprot}>
             Add UniProt
@@ -908,43 +836,37 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/* ======================== REFSEQ SECTION ======================== */}
+      {/* ---------------- REFSEQ ---------------- */}
       <div className="space-y-2">
-        <h3 className="text-lg font-semibold">
-          TF NCBI protein (RefSeq) accession number
-        </h3>
+        <h3 className="text-lg font-semibold">TF NCBI RefSeq accession</h3>
         <p className="text-sm text-muted">
-          Enter the RefSeq equivalent TF protein accession number for the
-          species closest to the reported species/strain (e.g. NP_799324). You
-          can add more than one TF.
+          Enter RefSeq TF protein accession (e.g. NP_799324).
         </p>
 
         <div className="flex gap-2">
           <input
             className="form-control flex-1"
-            placeholder="Example: NP_799324"
             value={refseqInput}
             onChange={(e) => handleAutocompleteRefseq(e.target.value)}
+            placeholder="NP_799324"
           />
           <button className="btn" onClick={handleAddRefseq}>
             Add RefSeq
           </button>
         </div>
 
-        {/* checkbox strain TF */}
-        <div className="mt-2 text-sm">
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={sameStrainTF}
-              onChange={(e) => setSameStrainTF(e.target.checked)}
-            />
-            <span>
-              This is the exact same strain as reported in the manuscript for
-              the TF.
-            </span>
-          </label>
-        </div>
+        {/* checkbox BEFORE the organism field */}
+        <label className="inline-flex items-center gap-2 text-sm mt-2">
+          <input
+            type="checkbox"
+            checked={sameStrainTF}
+            onChange={(e) => setSameStrainTF(e.target.checked)}
+          />
+          <span>
+            This is the exact same strain as reported in the manuscript for the
+            TF.
+          </span>
+        </label>
 
         {refseqSuggestions.length > 0 && (
           <div className="border border-border rounded bg-surface p-2 mt-1">
@@ -974,30 +896,28 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* Organism of origin for reported TF */}
         {!sameStrainTF && (
           <div className="mt-4 space-y-1">
             <label className="block font-medium text-sm">
               Organism of origin for reported TF
             </label>
+
             <textarea
               className="form-control"
               value={reportedTFOrganism}
               onChange={(e) => setReportedTFOrganism(e.target.value)}
               placeholder="Example: Pseudomonas sp. ADP"
             />
+
             <p className="text-xs text-muted">
-              If the work you are reporting uses a strain different from the
-              selected RefSeq genome, please type/paste the original strain
-              here. This helps tracking the correspondence between reported and
-              mapped strains.
+              Used when reported TF strain differs from the RefSeq strain.
             </p>
           </div>
         )}
       </div>
 
-      {/* ======================== PROMOTER / EXPRESSION FLAGS ======================== */}
-      <div className="space-y-3 mt-4 text-sm">
+      {/* ---------------- PROMOTER / EXPRESSION ---------------- */}
+      <div className="space-y-3 text-sm">
         <label className="inline-flex items-start gap-2">
           <input
             type="checkbox"
@@ -1005,10 +925,10 @@ export default function Step2GenomeTF() {
             onChange={(e) => setPromoterInfo(e.target.checked)}
           />
           <span>
-            The manuscript contains promoter information. <br />
+            The manuscript contains promoter information.
+            <br />
             <span className="text-xs text-muted">
-              Check if the paper provides experimental data on the structure and
-              sequence of a TF-regulated promoter.
+              Sequence or structure of a TF-regulated promoter.
             </span>
           </span>
         </label>
@@ -1020,21 +940,25 @@ export default function Step2GenomeTF() {
             onChange={(e) => setExpressionInfo(e.target.checked)}
           />
           <span>
-            The manuscript contains expression data. <br />
+            The manuscript contains expression data.
+            <br />
             <span className="text-xs text-muted">
-              Check if the paper provides experimental support for TF-mediated
-              regulation of genes (e.g. differential gene expression).
+              Evidence for TF-mediated differential gene expression.
             </span>
           </span>
         </label>
       </div>
 
-      {/* BOTÓN ÚNICO DE CONFIRMACIÓN */}
+      {/* ---------------- FINAL BUTTON ---------------- */}
       <div className="mt-6">
         <button className="btn" onClick={handleFinalConfirm}>
           Confirm and continue →
         </button>
       </div>
+
+      {finalError && (
+        <p className="text-red-400 text-sm mt-2">{finalError}</p>
+      )}
     </div>
   );
 }
