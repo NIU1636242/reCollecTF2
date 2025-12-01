@@ -557,7 +557,7 @@ export default function Step2GenomeTF() {
     goToNextStep();
   }
 
-  // ============================================================
+    // ============================================================
   // RENDER
   // ============================================================
   return (
@@ -783,9 +783,9 @@ export default function Step2GenomeTF() {
           </button>
         </div>
 
-        {uniprotItems.length > 0 && (
+        {uniProtItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
-            {uniprotItems.map((u, i) => (
+            {uniProtItems.map((u, i) => (
               <li key={i}>
                 <strong>{u.accession}</strong> — {u.description}
                 {u.existsInDB && " (from DB)"}
