@@ -557,7 +557,7 @@ export default function Step2GenomeTF() {
     goToNextStep();
   }
 
-    // ============================================================
+  // ============================================================
   // RENDER
   // ============================================================
   return (
@@ -610,9 +610,15 @@ export default function Step2GenomeTF() {
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
-          <p><strong>ID:</strong> {tfRow.TF_id}</p>
-          <p><strong>Family:</strong> {tfRow.family_name}</p>
-          <p><strong>TF Description:</strong> {tfRow.description || "—"}</p>
+          <p>
+            <strong>ID:</strong> {tfRow.TF_id}
+          </p>
+          <p>
+            <strong>Family:</strong> {tfRow.family_name}
+          </p>
+          <p>
+            <strong>TF Description:</strong> {tfRow.description || "—"}
+          </p>
           <p>
             <strong>Family Description:</strong>{" "}
             {tfRow.family_description || "—"}
@@ -660,7 +666,7 @@ export default function Step2GenomeTF() {
                 setSelectedFamily("");
               }}
             >
-              + Add TF Family
+              + Add New Family
             </button>
           </div>
 
@@ -705,7 +711,8 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Genome NCBI accession number</h3>
         <p className="text-sm text-muted">
-          Paste the NCBI GenBank genome accession for the closest species.
+          Paste the NCBI GenBank genome accession for the closest species or
+          strain (e.g. NC_000913.2).
         </p>
 
         <div className="flex gap-2">
@@ -720,7 +727,23 @@ export default function Step2GenomeTF() {
           </button>
         </div>
 
-        {/* LISTA DE GENOMES */}
+        {genomeSuggestions.length > 0 && (
+          <div className="border border-border rounded bg-surface p-2 mt-1">
+            {genomeSuggestions.map((g) => (
+              <div
+                key={g.genome_id}
+                className="p-1 hover:bg-muted cursor-pointer"
+                onClick={() => {
+                  setGenomeInput(g.genome_accession);
+                  setGenomeSuggestions([]);
+                }}
+              >
+                {g.genome_accession} — {g.organism}
+              </div>
+            ))}
+          </div>
+        )}
+
         {genomeItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
             {genomeItems.map((g, i) => (
@@ -732,17 +755,19 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* MOVER CHECKBOX AQUÍ */}
-        <label className="inline-flex items-center gap-2 text-sm mt-3">
+        {/* checkbox AFTER the organism field */}
+        <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
             checked={sameStrainGenome}
             onChange={(e) => setSameStrainGenome(e.target.checked)}
           />
           <span>
-            This is the exact same strain as reported in the manuscript for the sites.
+            This is the exact same strain as reported in the manuscript for the
+            sites.
           </span>
         </label>
+
 
         {!sameStrainGenome && (
           <div className="mt-4 space-y-1">
@@ -768,7 +793,7 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF UniProt accession number</h3>
         <p className="text-sm text-muted">
-          Paste the UniProt accession (e.g. Q87KN2).
+          Paste the UniProt accession for the TF (e.g. Q87KN2).
         </p>
 
         <div className="flex gap-2">
@@ -782,6 +807,23 @@ export default function Step2GenomeTF() {
             Add UniProt
           </button>
         </div>
+
+        {uniprotSuggestions.length > 0 && (
+          <div className="border border-border rounded bg-surface p-2 mt-1">
+            {uniprotSuggestions.map((u) => (
+              <div
+                key={u.TF_instance_id}
+                className="p-1 hover:bg-muted cursor-pointer"
+                onClick={() => {
+                  setUniprotInput(u.uniprot_accession);
+                  setUniprotSuggestions([]);
+                }}
+              >
+                {u.uniprot_accession} — {u.description}
+              </div>
+            ))}
+          </div>
+        )}
 
         {uniProtItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
@@ -798,7 +840,9 @@ export default function Step2GenomeTF() {
       {/* ---------------- REFSEQ ---------------- */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF NCBI RefSeq accession</h3>
-        <p className="text-sm text-muted">Enter RefSeq TF protein accession.</p>
+        <p className="text-sm text-muted">
+          Enter RefSeq TF protein accession (e.g. NP_799324).
+        </p>
 
         <div className="flex gap-2">
           <input
@@ -812,7 +856,23 @@ export default function Step2GenomeTF() {
           </button>
         </div>
 
-        {/* LISTA */}
+        {refseqSuggestions.length > 0 && (
+          <div className="border border-border rounded bg-surface p-2 mt-1">
+            {refseqSuggestions.map((r) => (
+              <div
+                key={r.TF_instance_id}
+                className="p-1 hover:bg-muted cursor-pointer"
+                onClick={() => {
+                  setRefseqInput(r.refseq_accession);
+                  setRefseqSuggestions([]);
+                }}
+              >
+                {r.refseq_accession} — {r.description}
+              </div>
+            ))}
+          </div>
+        )}
+
         {refseqItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
             {refseqItems.map((r, i) => (
@@ -824,15 +884,16 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* MOVER CHECKBOX AQUÍ */}
-        <label className="inline-flex items-center gap-2 text-sm mt-3">
+        {/* checkbox AFTER the organism field */}
+        <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
             checked={sameStrainTF}
             onChange={(e) => setSameStrainTF(e.target.checked)}
           />
           <span>
-            This is the exact same strain as reported in the manuscript for the TF.
+            This is the exact same strain as reported in the manuscript for the
+            TF.
           </span>
         </label>
 
@@ -856,9 +917,9 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/* ---------------- PROMOTER & EXPRESSION CHECKBOXES ---------------- */}
+      {/* ---------------- PROMOTER / EXPRESSION ---------------- */}
       <div className="space-y-3 text-sm">
-        <label className="inline-flex items-start gap-2">
+        <label className="flex items-start gap-2">
           <input
             type="checkbox"
             checked={promoterInfo}
@@ -873,7 +934,7 @@ export default function Step2GenomeTF() {
           </span>
         </label>
 
-        <label className="inline-flex items-start gap-2">
+        <label className="flex items-start gap-2">
           <input
             type="checkbox"
             checked={expressionInfo}
