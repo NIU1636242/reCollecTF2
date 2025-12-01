@@ -15,12 +15,14 @@ export default function Step3ExperimentalMethods() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [techDescription, setTechDescription] = useState("");
 
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [suggestions, setSuggestions] = useState([]); //Per a la llista d'autocompletat
 
   const [error, setError] = useState(""); //Missatges d'error (duplicats, etc.)
-
   const [showCreateForm, setShowCreateForm] = useState(false); //NOU: per obrir el formulari manual
+
+  //Nuevo: ECO para nueva técnica (input independiente)
+  const [newEcoCode, setNewEcoCode] = useState("");
 
   function esc(str) {
     //Evita error als strings amb les cometes simples
@@ -93,36 +95,31 @@ export default function Step3ExperimentalMethods() {
     setError("");
   }
 
-  //NOU BOTÓ → Obrir el formulari manual (com a collectf.org)
+  //NOU BOTÓ → Obrir formulari manual
   function handleAddTechnique() {
     setError("");
-
-    if (!ecoInput.trim()) {
-      setError("Please enter an ECO code before creating a new technique.");
-      return;
-    }
-
-    let raw = ecoInput.trim().toUpperCase();
-    if (!raw.startsWith("ECO:")) raw = "ECO:" + raw;
-
-    //Evitem duplicats
-    if (techniques.includes(raw)) {
-      setError("This ECO code is already added to the curation.");
-      return;
-    }
-
-    //Important: no validem amb QuickGO → es pot crear directament
-    setValidatedEco(raw);
-    setEcoName(""); //El nom es podrà omplir manualment
-    setExistsInDB(false);
     setShowCreateForm(true);
+
+    //reseteamos por si había datos previos
+    setValidatedEco(null);
+    setExistsInDB(false);
+    setTechDescription("");
+    setSelectedCategory("");
+    setNewEcoCode(""); //nuevo campo ECO manual
   }
 
-  //Creem el nou codi ECO per a fer el deploy al step7
+  //Crear la nova tècnica manualment
   async function handleCreateEco() {
-    if (!validatedEco) return;
+    if (!newEcoCode.trim()) {
+      setError("Please enter an ECO code.");
+      return;
+    }
 
-    if (techniques.includes(validatedEco)) {
+    let raw = newEcoCode.trim().toUpperCase();
+    if (!raw.startsWith("ECO:")) raw = "ECO:" + raw;
+
+    //Evitar duplicats
+    if (techniques.includes(raw)) {
       setError("This ECO code is already added to the curation.");
       return;
     }
@@ -130,25 +127,27 @@ export default function Step3ExperimentalMethods() {
     //PREP per deploy al Step7
     const sql = `
       INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
-      VALUES ('${esc(ecoName)}', '${esc(techDescription)}', NULL, '${esc(validatedEco)}');
+      VALUES (NULL, '${esc(techDescription)}', NULL, '${esc(raw)}');
 
       INSERT INTO core_experimentaltechnique_categories (experimentaltechnique_id, experimentaltechniquecategory_id)
       VALUES (
-        (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(validatedEco)}'),
+        (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(raw)}'),
         ${Number(selectedCategory)}
       );
     `;
 
-    setTechniques([...techniques, validatedEco]);
-    setValidatedEco(null);
-    setEcoInput("");
-    setSelectedCategory("");
-    setTechDescription("");
+    //Afegim a la llista
+    setTechniques([...techniques, raw]);
+
+    //reset form
     setShowCreateForm(false);
+    setNewEcoCode("");
+    setTechDescription("");
+    setSelectedCategory("");
     setError("");
   }
 
-  //Eliminar una tècnica de la llista (icona de paperera)
+  //Eliminar una tècnica de la llista
   function handleRemoveTechnique(index) {
     const updated = techniques.filter((_, i) => i !== index);
     setTechniques(updated);
@@ -206,26 +205,25 @@ export default function Step3ExperimentalMethods() {
         </div>
       )}
 
-      {/* Crear nou ECO → Formulari MANUAL com a collectf.org */}
-      {showCreateForm && validatedEco && existsInDB === false && (
+      {/* Formulari MANUAL */}
+      {showCreateForm && (
         <div className="p-4 bg-surface border border-border rounded space-y-3">
           <h3 className="text-lg font-semibold">
             Create new experimental technique
           </h3>
 
-          <p>
-            <strong>{ecoName || "New ECO technique"}</strong> ({validatedEco})
-          </p>
-
+          {/* ECO code manual */}
           <div>
-            <label className="block font-medium">Name</label>
+            <label className="block font-medium">ECO code</label>
             <input
               className="form-control"
-              value={ecoName}
-              onChange={(e) => setEcoName(e.target.value)}
+              placeholder="ECO:XXXXXXX"
+              value={newEcoCode}
+              onChange={(e) => setNewEcoCode(e.target.value)}
             />
           </div>
 
+          {/* Category */}
           <div>
             <label className="block font-medium">Category</label>
             <select
@@ -242,6 +240,7 @@ export default function Step3ExperimentalMethods() {
             </select>
           </div>
 
+          {/* Description */}
           <div>
             <label className="block font-medium">Description</label>
             <textarea
@@ -261,10 +260,11 @@ export default function Step3ExperimentalMethods() {
       <div>
         <h3 className="font-semibold mt-4">Added techniques:</h3>
         {techniques.length === 0 && <p>None yet.</p>}
+
         <ul className="list-disc pl-6">
           {techniques.map((t, i) => (
             <li key={i} className="flex items-center gap-2">
-              {typeof t === "string" ? t : `${t.eco} — ${t.name}`}
+              {t}
 
               {/* Icona de paperera → més estètica */}
               <button
