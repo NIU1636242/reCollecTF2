@@ -666,7 +666,7 @@ export default function Step2GenomeTF() {
                 setSelectedFamily("");
               }}
             >
-              + Add New Family
+              + Add TF Family
             </button>
           </div>
 
