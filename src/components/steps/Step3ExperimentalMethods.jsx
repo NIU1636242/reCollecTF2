@@ -263,31 +263,33 @@ export default function Step3ExperimentalMethods() {
 
         <ul className="list-disc pl-6">
           {techniques.map((t, i) => (
-            <li key={i} className="flex items-center gap-2">
-              {t}
+          <li key={i} className="list-item">
+            <div className="flex items-center gap-2">
+            {typeof t === "string" ? t : `${t.eco} — ${t.name}`}
 
-              {/* Icona de paperera → més estètica */}
-              <button
-                type="button"
-                onClick={() => handleRemoveTechnique(i)}
-                className="text-red-400 hover:text-red-300"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.8}
-                  stroke="currentColor"
-                  className="w-5 h-5"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 7h12M9 7V4h6v3m-8 4h10l-1 9H8l-1-9z"
-                  />
-                </svg>
-              </button>
-            </li>
+            {/* Icona de paperera */}
+            <button
+              type="button"
+              onClick={() => handleRemoveTechnique(i)}
+              className="text-red-400 hover:text-red-300"
+            >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.8}
+              stroke="currentColor"
+              className="w-5 h-5"
+             >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M6 7h12M9 7V4h6v3m-8 4h10l-1 9H8l-1-9z"
+            />
+            </svg>
+            </button>
+            </div>
+          </li>
           ))}
         </ul>
       </div>
