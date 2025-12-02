@@ -19,17 +19,26 @@ export default function Step1Publication() {
     }
   }, [publication]);
 
+  // Normalitzar títol per comparar (sense puntuació, minúscules, espais simples)
+  function normalizeTitle(str) {
+    return String(str || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   //DOI → PMID helper
   async function lookupPMIDfromTitle(title) {
-    const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(title)}`;
+    const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(
+      title
+    )}`;
     const res = await fetch(PROXY + encodeURIComponent(esearchUrl));
     const json = await res.json();
 
     const pmid = json.esearchresult?.idlist?.[0];
     return pmid || null;
   }
-
 
   //Main search function
   async function handleSearch(e) {
@@ -58,7 +67,7 @@ export default function Step1Publication() {
           data = {
             pmid: q,
             title: rec.title || "Title not available",
-            authors: (rec.authors || []).map(a => a.name).join(", "),
+            authors: (rec.authors || []).map((a) => a.name).join(", "),
             journal: rec.fulljournalname || "Unknown",
             pubdate: rec.pubdate || "No date",
             doi: rec.elocationid || "No DOI",
@@ -90,16 +99,29 @@ export default function Step1Publication() {
         data = {
           pmid: pmid || "—",
           title: rec.title?.[0] || "Title not available",
-          authors: rec.author?.map(a => `${a.given || ""} ${a.family || ""}`).join(", "),
-          journal: pubmedRec?.fulljournalname || rec["container-title"]?.[0] || "Unknown",
-          pubdate: pubmedRec?.pubdate || rec.created?.["date-time"]?.split("T")[0] || "No date",
+          authors: rec.author
+            ?.map((a) => `${a.given || ""} ${a.family || ""}`)
+            .join(", "),
+          journal:
+            pubmedRec?.fulljournalname ||
+            rec["container-title"]?.[0] ||
+            "Unknown",
+          pubdate:
+            pubmedRec?.pubdate ||
+            rec.created?.["date-time"]?.split("T")[0] ||
+            "No date",
           doi: q,
         };
       }
 
-      //Search by TITLE (ESearch → ESummary)
+      //Search by TITLE (ESearch → ESummary, pero solo si el título coincide)
       else {
-        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(`"${q}"`)}[title]`;
+        const normQuery = normalizeTitle(q);
+
+        // Buscamos por título (campo [ti])
+        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(
+          q
+        )}[ti]`;
         const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
         const js1 = await r1.json();
 
@@ -112,10 +134,18 @@ export default function Step1Publication() {
 
         const rec = js2.result?.[pmid];
         if (rec) {
+          const normTitle = normalizeTitle(rec.title || "");
+
+          // Si el títol retornat NO coincideix amb el que ha escrit l'usuari,
+          // considerem que la cerca no és prou específica.
+          if (!normTitle || normTitle !== normQuery) {
+            throw new Error("No exact title match found.");
+          }
+
           data = {
             pmid,
             title: rec.title || "Title not available",
-            authors: (rec.authors || []).map(a => a.name).join(", "),
+            authors: (rec.authors || []).map((a) => a.name).join(", "),
             journal: rec.fulljournalname || "Unknown",
             pubdate: rec.pubdate || "No date",
             doi: rec.elocationid || "No DOI",
@@ -125,7 +155,6 @@ export default function Step1Publication() {
 
       if (!data) throw new Error("No results found.");
       setArticle(data);
-
     } catch (e) {
       console.error(e);
       setError("Error searching the article.");
@@ -134,14 +163,12 @@ export default function Step1Publication() {
     }
   }
 
-
   const handleConfirm = () => {
     if (article) {
       setPublication(article);
       goToNextStep();
     }
   };
-
 
   return (
     <div className="space-y-4">
@@ -173,11 +200,21 @@ export default function Step1Publication() {
       {article && (
         <div className="bg-surface border border-border rounded p-4 space-y-1">
           <h3 className="text-xl font-semibold">{article.title}</h3>
-          <p><strong>Authors:</strong> {article.authors}</p>
-          <p><strong>Journal:</strong> {article.journal}</p>
-          <p><strong>Date:</strong> {article.pubdate}</p>
-          <p><strong>PMID:</strong> {article.pmid}</p>
-          <p><strong>DOI:</strong> {article.doi}</p>
+          <p>
+            <strong>Authors:</strong> {article.authors}
+          </p>
+          <p>
+            <strong>Journal:</strong> {article.journal}
+          </p>
+          <p>
+            <strong>Date:</strong> {article.pubdate}
+          </p>
+          <p>
+            <strong>PMID:</strong> {article.pmid}
+          </p>
+          <p>
+            <strong>DOI:</strong> {article.doi}
+          </p>
 
           <div className="pt-3">
             <button className="btn" onClick={handleConfirm}>
