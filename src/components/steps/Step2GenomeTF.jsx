@@ -213,11 +213,12 @@ export default function Step2GenomeTF() {
   }
 
   // ============================================================
-  // GENOME AUTOCOMPLETE + VALIDATION
+  // GENOME AUTOCOMPLETE + AUTO-ADD ON SELECT
   // ============================================================
   async function handleAutocompleteGenome(val) {
     setGenomeInput(val);
-    if (!val || val.length < 1) {
+
+    if (!val) {
       setGenomeSuggestions([]);
       return;
     }
@@ -234,6 +235,122 @@ export default function Step2GenomeTF() {
     setGenomeSuggestions(rows);
   }
 
+  async function addGenomeItem(accession, description, organism, existsInDB) {
+    // prevent duplicates
+    if (genomeItems.some((x) => x.accession === accession)) return;
+
+    const updated = [
+      ...genomeItems,
+      {
+        accession,
+        description,
+        organism,
+        existsInDB,
+      },
+    ];
+
+    setGenomeItems(updated);
+    setGenomeList(updated);
+  }
+
+  // on select suggestion
+  function selectGenomeSuggestion(g) {
+    addGenomeItem(g.genome_accession, g.organism, g.organism, true);
+    setGenomeSuggestions([]);
+    setGenomeInput("");
+  }
+
+  // ============================================================
+  // UNIPROT AUTOCOMPLETE + AUTO-ADD ON SELECT
+  // ============================================================
+  async function handleAutocompleteUniprot(val) {
+    setUniprotInput(val);
+
+    if (!val) {
+      setUniprotSuggestions([]);
+      return;
+    }
+
+    const rows = await runQuery(
+      `
+      SELECT TF_instance_id, uniprot_accession, refseq_accession, description
+      FROM core_tfinstance
+      WHERE uniprot_accession LIKE ? || '%'
+      ORDER BY uniprot_accession ASC
+      `,
+      [val]
+    );
+    setUniprotSuggestions(rows);
+  }
+
+  function addUniProtItem(accession, description, existsInDB) {
+    if (uniProtItems.some((x) => x.accession === accession)) return;
+
+    const updated = [
+      ...uniProtItems,
+      {
+        accession,
+        description,
+        existsInDB,
+      },
+    ];
+    setUniProtItems(updated);
+    setUniprotList(updated);
+  }
+
+  function selectUniProtSuggestion(u) {
+    addUniProtItem(u.uniprot_accession, u.description, true);
+    setUniprotSuggestions([]);
+    setUniprotInput("");
+  }
+
+  // ============================================================
+  // REFSEQ AUTOCOMPLETE + AUTO-ADD ON SELECT
+  // ============================================================
+  async function handleAutocompleteRefseq(val) {
+    setRefseqInput(val);
+
+    if (!val) {
+      setRefseqSuggestions([]);
+      return;
+    }
+
+    const rows = await runQuery(
+      `
+      SELECT TF_instance_id, refseq_accession, description
+      FROM core_tfinstance
+      WHERE refseq_accession LIKE ? || '%'
+      ORDER BY refseq_accession ASC
+      `,
+      [val]
+    );
+    setRefseqSuggestions(rows);
+  }
+
+  function addRefseqItem(accession, description, existsInDB) {
+    if (refseqItems.some((x) => x.accession === accession)) return;
+
+    const updated = [
+      ...refseqItems,
+      {
+        accession,
+        description,
+        existsInDB,
+      },
+    ];
+    setRefseqItems(updated);
+    setRefseqList(updated);
+  }
+
+  function selectRefseqSuggestion(r) {
+    addRefseqItem(r.refseq_accession, r.description, true);
+    setRefseqSuggestions([]);
+    setRefseqInput("");
+  }
+
+  // ============================================================
+  // EXTERNAL APIS (per afegir codis no presents a la DB)
+  // ============================================================
   async function fetchNuccoreSummary(acc) {
     const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(
       acc
@@ -252,193 +369,25 @@ export default function Step2GenomeTF() {
     return { title: rec.title, organism: rec.organism };
   }
 
-  async function handleAddGenome() {
-    const acc = genomeInput.trim();
-    if (!acc) return;
-    if (genomeItems.some((g) => g.accession === acc)) {
-      setGenomeInput("");
-      return;
-    }
-
-    const rows = await runQuery(
-      `
-      SELECT genome_id, genome_accession, organism
-      FROM core_genome
-      WHERE genome_accession = ?
-      LIMIT 1
-      `,
-      [acc]
-    );
-
-    if (rows.length) {
-      const g = rows[0];
-      const updated = [
-        ...genomeItems,
-        {
-          accession: g.genome_accession,
-          description: g.organism,
-          organism: g.organism,
-          existsInDB: true,
-        },
-      ];
-      setGenomeItems(updated);
-      setGenomeList(updated);
-      setGenomeInput("");
-      setGenomeSuggestions([]);
-      return;
-    }
-
-    const info = await fetchNuccoreSummary(acc);
-    if (!info) return;
-
-    const updated = [
-      ...genomeItems,
-      {
-        accession: acc,
-        description: info.title,
-        organism: info.organism,
-        existsInDB: false,
-      },
-    ];
-    setGenomeItems(updated);
-    setGenomeList(updated);
-
-    setGenomeInput("");
-    setGenomeSuggestions([]);
-  }
-
-  // ============================================================
-  // UNIPROT AUTOCOMPLETE + VALIDATION
-  // ============================================================
-  async function handleAutocompleteUniprot(val) {
-    setUniprotInput(val);
-    if (!val || val.length < 1) {
-      setUniprotSuggestions([]);
-      return;
-    }
-
-    const rows = await runQuery(
-      `
-      SELECT TF_instance_id, uniprot_accession, refseq_accession, description
-      FROM core_tfinstance
-      WHERE uniprot_accession LIKE ? || '%'
-      ORDER BY uniprot_accession ASC
-      `,
-      [val]
-    );
-    setUniprotSuggestions(rows);
-  }
-
   async function fetchUniprotSummary(acc) {
-    const url = `${UNIPROT_BASE}/${encodeURIComponent(acc)}.json`;
-    const r = await fetch(PROXY + encodeURIComponent(url));
-    if (!r.ok) return null;
-    const j = await r.json();
+    try {
+      const url = `${UNIPROT_BASE}/${encodeURIComponent(acc)}.json`;
+      const r = await fetch(PROXY + encodeURIComponent(url));
+      if (!r.ok) return null;
+      const j = await r.json();
 
-    const name =
-      j.proteinDescription?.recommendedName?.fullName?.value ||
-      j.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
-      "";
+      const name =
+        j.proteinDescription?.recommendedName?.fullName?.value ||
+        j.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
+        "";
 
-    return {
-      title: name || j.id || acc,
-      organism: j.organism?.scientificName || "",
-    };
-  }
-
-  async function handleAddUniprot() {
-    const acc = uniprotInput.trim();
-    if (!acc) return;
-    if (uniProtItems.some((i) => i.accession === acc)) {
-      setUniprotInput("");
-      return;
+      return {
+        title: name || j.id || acc,
+        organism: j.organism?.scientificName || "",
+      };
+    } catch {
+      return null;
     }
-
-    const rows = await runQuery(
-      `
-      SELECT TF_instance_id, uniprot_accession, refseq_accession, description
-      FROM core_tfinstance
-      WHERE uniprot_accession = ?
-      LIMIT 1
-      `,
-      [acc]
-    );
-
-    if (rows.length) {
-      const r = rows[0];
-
-      const updatedUni = [
-        ...uniProtItems,
-        {
-          accession: r.uniprot_accession,
-          description: r.description || "",
-          existsInDB: true,
-          linkedRefseq: r.refseq_accession || null,
-        },
-      ];
-      setUniProtItems(updatedUni);
-      setUniprotList(updatedUni);
-
-      if (r.refseq_accession) {
-        if (!refseqItems.some((x) => x.accession === r.refseq_accession)) {
-          const updatedRef = [
-            ...refseqItems,
-            {
-              accession: r.refseq_accession,
-              description: r.description || "",
-              existsInDB: true,
-            },
-          ];
-          setRefseqItems(updatedRef);
-          setRefseqList(updatedRef);
-        }
-        // NO rellenar el input → FIX pedido
-      }
-
-      setUniprotInput("");
-      setUniprotSuggestions([]);
-      return;
-    }
-
-    const info = await fetchUniprotSummary(acc);
-    if (!info) return;
-
-    const updated = [
-      ...uniProtItems,
-      {
-        accession: acc,
-        description: info.title,
-        existsInDB: false,
-        linkedRefseq: null,
-      },
-    ];
-    setUniProtItems(updated);
-    setUniprotList(updated);
-
-    setUniprotInput("");
-    setUniprotSuggestions([]);
-  }
-
-  // ============================================================
-  // REFSEQ AUTOCOMPLETE + VALIDATION
-  // ============================================================
-  async function handleAutocompleteRefseq(val) {
-    setRefseqInput(val);
-    if (!val || val.length < 1) {
-      setRefseqSuggestions([]);
-      return;
-    }
-
-    const rows = await runQuery(
-      `
-      SELECT TF_instance_id, refseq_accession, description
-      FROM core_tfinstance
-      WHERE refseq_accession LIKE ? || '%'
-      ORDER BY refseq_accession ASC
-      `,
-      [val]
-    );
-    setRefseqSuggestions(rows);
   }
 
   async function fetchProteinSummary(acc) {
@@ -458,10 +407,92 @@ export default function Step2GenomeTF() {
     return rec ? { title: rec.title } : null;
   }
 
-  async function handleAddRefseq() {
+  // ============================================================
+  // ENTER → ADD MANUAL ACCESSION SI NO ESTÀ A LA DB
+  // ============================================================
+  async function handleGenomeEnter() {
+    const acc = genomeInput.trim();
+    if (!acc) return;
+
+    if (genomeItems.some((g) => g.accession === acc)) {
+      setGenomeInput("");
+      return;
+    }
+
+    const rows = await runQuery(
+      `
+      SELECT genome_id, genome_accession, organism
+      FROM core_genome
+      WHERE genome_accession = ?
+      LIMIT 1
+      `,
+      [acc]
+    );
+
+    if (rows.length) {
+      const g = rows[0];
+      await addGenomeItem(g.genome_accession, g.organism, g.organism, true);
+      setGenomeInput("");
+      setGenomeSuggestions([]);
+      return;
+    }
+
+    const info = await fetchNuccoreSummary(acc);
+    if (!info) return;
+
+    await addGenomeItem(acc, info.title, info.organism, false);
+    setGenomeInput("");
+    setGenomeSuggestions([]);
+  }
+
+  async function handleUniprotEnter() {
+    const acc = uniprotInput.trim();
+    if (!acc) return;
+
+    if (uniProtItems.some((u) => u.accession === acc)) {
+      setUniprotInput("");
+      return;
+    }
+
+    const rows = await runQuery(
+      `
+      SELECT TF_instance_id, uniprot_accession, refseq_accession, description
+      FROM core_tfinstance
+      WHERE uniprot_accession = ?
+      LIMIT 1
+      `,
+      [acc]
+    );
+
+    if (rows.length) {
+      const r = rows[0];
+      addUniProtItem(r.uniprot_accession, r.description || "", true);
+
+      // Si hi ha RefSeq associat, també l'afegim
+      if (r.refseq_accession) {
+        if (!refseqItems.some((x) => x.accession === r.refseq_accession)) {
+          addRefseqItem(r.refseq_accession, r.description || "", true);
+        }
+      }
+
+      setUniprotInput("");
+      setUniprotSuggestions([]);
+      return;
+    }
+
+    const info = await fetchUniprotSummary(acc);
+    if (!info) return;
+
+    addUniProtItem(acc, info.title, false);
+    setUniprotInput("");
+    setUniprotSuggestions([]);
+  }
+
+  async function handleRefseqEnter() {
     const acc = refseqInput.trim();
     if (!acc) return;
-    if (refseqItems.some((i) => i.accession === acc)) {
+
+    if (refseqItems.some((r) => r.accession === acc)) {
       setRefseqInput("");
       return;
     }
@@ -478,17 +509,7 @@ export default function Step2GenomeTF() {
 
     if (rows.length) {
       const r = rows[0];
-      const updated = [
-        ...refseqItems,
-        {
-          accession: r.refseq_accession,
-          description: r.description || "",
-          existsInDB: true,
-        },
-      ];
-      setRefseqItems(updated);
-      setRefseqList(updated);
-
+      addRefseqItem(r.refseq_accession, r.description || "", true);
       setRefseqInput("");
       setRefseqSuggestions([]);
       return;
@@ -497,19 +518,30 @@ export default function Step2GenomeTF() {
     const info = await fetchProteinSummary(acc);
     if (!info) return;
 
-    const updated = [
-      ...refseqItems,
-      {
-        accession: acc,
-        description: info.title,
-        existsInDB: false,
-      },
-    ];
-    setRefseqItems(updated);
-    setRefseqList(updated);
-
+    addRefseqItem(acc, info.title, false);
     setRefseqInput("");
     setRefseqSuggestions([]);
+  }
+
+  // ============================================================
+  // REMOVE ICONS (GENOME / UNIPROT / REFSEQ)
+  // ============================================================
+  function removeGenome(index) {
+    const updated = genomeItems.filter((_, i) => i !== index);
+    setGenomeItems(updated);
+    setGenomeList(updated);
+  }
+
+  function removeUniProt(index) {
+    const updated = uniProtItems.filter((_, i) => i !== index);
+    setUniProtItems(updated);
+    setUniprotList(updated);
+  }
+
+  function removeRefseq(index) {
+    const updated = refseqItems.filter((_, i) => i !== index);
+    setRefseqItems(updated);
+    setRefseqList(updated);
   }
 
   // ============================================================
@@ -525,6 +557,16 @@ export default function Step2GenomeTF() {
 
     if (genomeItems.length === 0) {
       setFinalError("Please add at least one genome accession.");
+      return;
+    }
+
+    if (uniProtItems.length === 0) {
+      setFinalError("Please add at least one UniProt accession.");
+      return;
+    }
+
+    if (refseqItems.length === 0) {
+      setFinalError("Please add at least one RefSeq accession.");
       return;
     }
 
@@ -568,24 +610,26 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <label className="block font-medium">TF Name</label>
 
-        <input
-          className="form-control"
-          placeholder="Example: LexA"
-          value={searchName}
-          onChange={(e) => handleAutocompleteTF(e.target.value)}
-        />
+        <div className="flex gap-2">
+          <input
+            className="form-control flex-1"
+            placeholder="Example: LexA"
+            value={searchName}
+            onChange={(e) => handleAutocompleteTF(e.target.value)}
+          />
 
-        <button
-          className="btn mt-2"
-          onClick={() => {
-            setShowCreateForm(true);
-            setTfRow(null);
-            setSuggestions([]);
-            setNewTFName(searchName);
-          }}
-        >
-          + Add TF
-        </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setShowCreateForm(true);
+              setTfRow(null);
+              setSuggestions([]);
+              setNewTFName(searchName);
+            }}
+          >
+            + Add TF
+          </button>
+        </div>
 
         {suggestions.length > 0 && (
           <div className="border border-border rounded bg-surface p-2 mt-1">
@@ -632,42 +676,46 @@ export default function Step2GenomeTF() {
           <h3 className="text-lg font-semibold text-accent">Create New TF</h3>
 
           <div>
-            <label className="block font-medium">TF Name</label>
-            <input
-              className="form-control"
-              value={newTFName}
-              onChange={(e) => setNewTFName(e.target.value)}
-            />
+            <label className="block font-medium mb-1">TF Name</label>
+            <div className="flex gap-2">
+              <input
+                className="form-control flex-1"
+                value={newTFName}
+                onChange={(e) => setNewTFName(e.target.value)}
+              />
+            </div>
           </div>
 
           <div>
-            <label className="block font-medium">Existing Family</label>
-            <select
-              className="form-control"
-              value={selectedFamily}
-              onChange={(e) => {
-                setSelectedFamily(e.target.value);
-                setShowNewFamilyForm(false);
-              }}
-            >
-              <option value="">Select a family...</option>
-              {families.map((f) => (
-                <option key={f.tf_family_id} value={f.tf_family_id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
+            <label className="block font-medium mb-1">Existing Family</label>
+            <div className="flex gap-2">
+              <select
+                className="form-control flex-1"
+                value={selectedFamily}
+                onChange={(e) => {
+                  setSelectedFamily(e.target.value);
+                  setShowNewFamilyForm(false);
+                }}
+              >
+                <option value="">Select a family...</option>
+                {families.map((f) => (
+                  <option key={f.tf_family_id} value={f.tf_family_id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
 
-            <button
-              type="button"
-              className="btn mt-2"
-              onClick={() => {
-                setShowNewFamilyForm(true);
-                setSelectedFamily("");
-              }}
-            >
-              + Add TF Family
-            </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setShowNewFamilyForm(true);
+                  setSelectedFamily("");
+                }}
+              >
+                + Add TF Family
+              </button>
+            </div>
           </div>
 
           {showNewFamilyForm && (
@@ -715,17 +763,18 @@ export default function Step2GenomeTF() {
           strain (e.g. NC_000913.2).
         </p>
 
-        <div className="flex gap-2">
-          <input
-            className="form-control flex-1"
-            value={genomeInput}
-            onChange={(e) => handleAutocompleteGenome(e.target.value)}
-            placeholder="NC_000913.2"
-          />
-          <button className="btn" onClick={handleAddGenome}>
-            Add genome
-          </button>
-        </div>
+        <input
+          className="form-control flex-1"
+          value={genomeInput}
+          onChange={(e) => handleAutocompleteGenome(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleGenomeEnter();
+            }
+          }}
+          placeholder="NC_000913.2"
+        />
 
         {genomeSuggestions.length > 0 && (
           <div className="border border-border rounded bg-surface p-2 mt-1">
@@ -733,10 +782,7 @@ export default function Step2GenomeTF() {
               <div
                 key={g.genome_id}
                 className="p-1 hover:bg-muted cursor-pointer"
-                onClick={() => {
-                  setGenomeInput(g.genome_accession);
-                  setGenomeSuggestions([]);
-                }}
+                onClick={() => selectGenomeSuggestion(g)}
               >
                 {g.genome_accession} — {g.organism}
               </div>
@@ -747,15 +793,41 @@ export default function Step2GenomeTF() {
         {genomeItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
             {genomeItems.map((g, i) => (
-              <li key={i}>
-                <strong>{g.accession}</strong> — {g.description}
-                {g.existsInDB && " (from DB)"}
+              <li key={i} className="list-item">
+                <div className="flex items-center gap-2">
+                  <span>
+                    <strong>{g.accession}</strong> — {g.description}
+                    {g.existsInDB && " (from DB)"}
+                  </span>
+
+                  {/* Trash icon */}
+                  <button
+                    type="button"
+                    onClick={() => removeGenome(i)}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.8}
+                      stroke="currentColor"
+                      className="w-5 h-5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M6 7h12M9 7V4h6v3m-8 4h10l-1 9H8l-1-9z"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
 
-        {/* checkbox AFTER the organism field */}
+        {/* checkbox AFTER list and BEFORE organism field */}
         <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
@@ -767,7 +839,6 @@ export default function Step2GenomeTF() {
             sites.
           </span>
         </label>
-
 
         {!sameStrainGenome && (
           <div className="mt-4 space-y-1">
@@ -796,17 +867,18 @@ export default function Step2GenomeTF() {
           Paste the UniProt accession for the TF (e.g. Q87KN2).
         </p>
 
-        <div className="flex gap-2">
-          <input
-            className="form-control flex-1"
-            value={uniprotInput}
-            onChange={(e) => handleAutocompleteUniprot(e.target.value)}
-            placeholder="Q87KN2"
-          />
-          <button className="btn" onClick={handleAddUniprot}>
-            Add UniProt
-          </button>
-        </div>
+        <input
+          className="form-control flex-1"
+          value={uniprotInput}
+          onChange={(e) => handleAutocompleteUniprot(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleUniprotEnter();
+            }
+          }}
+          placeholder="Q87KN2"
+        />
 
         {uniprotSuggestions.length > 0 && (
           <div className="border border-border rounded bg-surface p-2 mt-1">
@@ -814,10 +886,7 @@ export default function Step2GenomeTF() {
               <div
                 key={u.TF_instance_id}
                 className="p-1 hover:bg-muted cursor-pointer"
-                onClick={() => {
-                  setUniprotInput(u.uniprot_accession);
-                  setUniprotSuggestions([]);
-                }}
+                onClick={() => selectUniProtSuggestion(u)}
               >
                 {u.uniprot_accession} — {u.description}
               </div>
@@ -828,9 +897,34 @@ export default function Step2GenomeTF() {
         {uniProtItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
             {uniProtItems.map((u, i) => (
-              <li key={i}>
-                <strong>{u.accession}</strong> — {u.description}
-                {u.existsInDB && " (from DB)"}
+              <li key={i} className="list-item">
+                <div className="flex items-center gap-2">
+                  <span>
+                    <strong>{u.accession}</strong> — {u.description}
+                    {u.existsInDB && " (from DB)"}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => removeUniProt(i)}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.8}
+                      stroke="currentColor"
+                      className="w-5 h-5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M6 7h12M9 7V4h6v3m-8 4h10l-1 9H8l-1-9z"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -844,17 +938,18 @@ export default function Step2GenomeTF() {
           Enter RefSeq TF protein accession (e.g. NP_799324).
         </p>
 
-        <div className="flex gap-2">
-          <input
-            className="form-control flex-1"
-            value={refseqInput}
-            onChange={(e) => handleAutocompleteRefseq(e.target.value)}
-            placeholder="NP_799324"
-          />
-          <button className="btn" onClick={handleAddRefseq}>
-            Add RefSeq
-          </button>
-        </div>
+        <input
+          className="form-control flex-1"
+          value={refseqInput}
+          onChange={(e) => handleAutocompleteRefseq(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleRefseqEnter();
+            }
+          }}
+          placeholder="NP_799324"
+        />
 
         {refseqSuggestions.length > 0 && (
           <div className="border border-border rounded bg-surface p-2 mt-1">
@@ -862,10 +957,7 @@ export default function Step2GenomeTF() {
               <div
                 key={r.TF_instance_id}
                 className="p-1 hover:bg-muted cursor-pointer"
-                onClick={() => {
-                  setRefseqInput(r.refseq_accession);
-                  setRefseqSuggestions([]);
-                }}
+                onClick={() => selectRefseqSuggestion(r)}
               >
                 {r.refseq_accession} — {r.description}
               </div>
@@ -876,15 +968,40 @@ export default function Step2GenomeTF() {
         {refseqItems.length > 0 && (
           <ul className="list-disc pl-6 mt-2 text-sm">
             {refseqItems.map((r, i) => (
-              <li key={i}>
-                <strong>{r.accession}</strong> — {r.description}
-                {r.existsInDB && " (from DB)"}
+              <li key={i} className="list-item">
+                <div className="flex items-center gap-2">
+                  <span>
+                    <strong>{r.accession}</strong> — {r.description}
+                    {r.existsInDB && " (from DB)"}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => removeRefseq(i)}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.8}
+                      stroke="currentColor"
+                      className="w-5 h-5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M6 7h12M9 7V4h6v3m-8 4h10l-1 9H8l-1-9z"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
 
-        {/* checkbox AFTER the organism field */}
+        {/* checkbox AFTER list and BEFORE organism field */}
         <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
