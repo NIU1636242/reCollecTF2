@@ -99,7 +99,7 @@ export default function Step1Publication() {
 
       //Search by TITLE (ESearch → ESummary)
       else {
-        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(q)}`;
+        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(`"${q}"`)}[title]`;
         const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
         const js1 = await r1.json();
 
@@ -158,6 +158,15 @@ export default function Step1Publication() {
           {loading ? "Searching..." : "Search"}
         </button>
       </div>
+
+      <a
+        href="https://pubmed.ncbi.nlm.nih.gov/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-block text-sm text-blue-400 hover:text-blue-300 underline mt-1"
+      >
+        Search directly on PubMed
+      </a>
 
       {error && <p className="text-red-400">{error}</p>}
 

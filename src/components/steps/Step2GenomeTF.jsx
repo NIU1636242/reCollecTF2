@@ -951,7 +951,7 @@ export default function Step2GenomeTF() {
               handleRefseqEnter();
             }
           }}
-          placeholder="NP_799324"
+          placeholder="WP_000037239"
         />
 
         {refseqSuggestions.length > 0 && (
