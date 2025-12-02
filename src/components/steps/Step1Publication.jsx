@@ -19,28 +19,7 @@ export default function Step1Publication() {
     }
   }, [publication]);
 
-  // Normalitzar títol per comparar (sense puntuació, minúscules, espais simples)
-  function normalizeTitle(str) {
-    return String(str || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  //DOI → PMID helper
-  async function lookupPMIDfromTitle(title) {
-    const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(
-      title
-    )}`;
-    const res = await fetch(PROXY + encodeURIComponent(esearchUrl));
-    const json = await res.json();
-
-    const pmid = json.esearchresult?.idlist?.[0];
-    return pmid || null;
-  }
-
-  //Main search function
+  //Main search function (PMID o DOI SOLO)
   async function handleSearch(e) {
     e.preventDefault();
     setError("");
@@ -55,6 +34,13 @@ export default function Step1Publication() {
       const q = query.trim();
       const isPMID = /^\d+$/.test(q);
       const isDOI = q.includes("/");
+
+      // Si no parece ni PMID ni DOI → error directo
+      if (!isPMID && !isDOI) {
+        throw new Error(
+          "Please enter a valid PMID or DOI. For title searches use the PubMed link below."
+        );
+      }
 
       //Search by PMID
       if (isPMID) {
@@ -75,58 +61,16 @@ export default function Step1Publication() {
         }
       }
 
-      //Search by DOI (CrossRef → PMID → ESummary)
-      else if (isDOI) {
-        const url = `https://api.crossref.org/works/${encodeURIComponent(q)}`;
-        const res = await fetch(PROXY + encodeURIComponent(url));
-        const json = await res.json();
-        const rec = json.message;
-
-        if (!rec) throw new Error("No CrossRef record found.");
-
-        // Try to get PMID using PubMed title search
-        const pmid = await lookupPMIDfromTitle(rec.title?.[0] || "");
-
-        let pubmedRec = null;
-
-        if (pmid) {
-          const sumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
-          const r2 = await fetch(PROXY + encodeURIComponent(sumUrl));
-          const js2 = await r2.json();
-          pubmedRec = js2.result?.[pmid];
-        }
-
-        data = {
-          pmid: pmid || "—",
-          title: rec.title?.[0] || "Title not available",
-          authors: rec.author
-            ?.map((a) => `${a.given || ""} ${a.family || ""}`)
-            .join(", "),
-          journal:
-            pubmedRec?.fulljournalname ||
-            rec["container-title"]?.[0] ||
-            "Unknown",
-          pubdate:
-            pubmedRec?.pubdate ||
-            rec.created?.["date-time"]?.split("T")[0] ||
-            "No date",
-          doi: q,
-        };
-      }
-
-      //Search by TITLE (ESearch → ESummary, pero solo si el título coincide)
-      else {
-        const normQuery = normalizeTitle(q);
-
-        // Buscamos por título (campo [ti])
+      //Search by DOI directamente en PubMed (ESearch [doi] → ESummary)
+      if (isDOI) {
         const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(
           q
-        )}[ti]`;
+        )}[doi]`;
         const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
         const js1 = await r1.json();
 
         const pmid = js1.esearchresult?.idlist?.[0];
-        if (!pmid) throw new Error("No PubMed matches found.");
+        if (!pmid) throw new Error("No PubMed matches found for this DOI.");
 
         const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
         const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
@@ -134,21 +78,13 @@ export default function Step1Publication() {
 
         const rec = js2.result?.[pmid];
         if (rec) {
-          const normTitle = normalizeTitle(rec.title || "");
-
-          // Si el títol retornat NO coincideix amb el que ha escrit l'usuari,
-          // considerem que la cerca no és prou específica.
-          if (!normTitle || normTitle !== normQuery) {
-            throw new Error("No exact title match found.");
-          }
-
           data = {
             pmid,
             title: rec.title || "Title not available",
             authors: (rec.authors || []).map((a) => a.name).join(", "),
             journal: rec.fulljournalname || "Unknown",
             pubdate: rec.pubdate || "No date",
-            doi: rec.elocationid || "No DOI",
+            doi: rec.elocationid || q || "No DOI",
           };
         }
       }
@@ -177,7 +113,7 @@ export default function Step1Publication() {
       <div className="flex gap-2">
         <input
           className="form-control"
-          placeholder="PMID, DOI or Title"
+          placeholder="PMID or DOI"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -192,7 +128,7 @@ export default function Step1Publication() {
         rel="noopener noreferrer"
         className="inline-block text-sm text-blue-400 hover:text-blue-300 underline mt-1"
       >
-        Search directly on PubMed
+        Search article directly on PubMed
       </a>
 
       {error && <p className="text-red-400">{error}</p>}
