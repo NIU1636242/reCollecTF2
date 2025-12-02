@@ -235,7 +235,7 @@ export default function Step2GenomeTF() {
     setGenomeSuggestions(rows);
   }
 
-  async function addGenomeItem(accession, description, organism, existsInDB) {
+  async function addGenomeItem(accession, description, organism) {
     // prevent duplicates
     if (genomeItems.some((x) => x.accession === accession)) return;
 
@@ -245,7 +245,6 @@ export default function Step2GenomeTF() {
         accession,
         description,
         organism,
-        existsInDB,
       },
     ];
 
@@ -283,7 +282,7 @@ export default function Step2GenomeTF() {
     setUniprotSuggestions(rows);
   }
 
-  function addUniProtItem(accession, description, existsInDB) {
+  function addUniProtItem(accession, description) {
     if (uniProtItems.some((x) => x.accession === accession)) return;
 
     const updated = [
@@ -291,7 +290,6 @@ export default function Step2GenomeTF() {
       {
         accession,
         description,
-        existsInDB,
       },
     ];
     setUniProtItems(updated);
@@ -300,6 +298,14 @@ export default function Step2GenomeTF() {
 
   function selectUniProtSuggestion(u) {
     addUniProtItem(u.uniprot_accession, u.description, true);
+
+    //auto-add linked RefSeq
+    if (u.refseq_accession) {
+      if (!refseqItems.some((x) => x.accession === u.refseq_accession)) {
+        addRefseqItem(u.refseq_accession, u.description || "", true);
+      }
+    }
+
     setUniprotSuggestions([]);
     setUniprotInput("");
   }
@@ -327,7 +333,7 @@ export default function Step2GenomeTF() {
     setRefseqSuggestions(rows);
   }
 
-  function addRefseqItem(accession, description, existsInDB) {
+  function addRefseqItem(accession, description) {
     if (refseqItems.some((x) => x.accession === accession)) return;
 
     const updated = [
@@ -335,7 +341,6 @@ export default function Step2GenomeTF() {
       {
         accession,
         description,
-        existsInDB,
       },
     ];
     setRefseqItems(updated);
@@ -797,7 +802,6 @@ export default function Step2GenomeTF() {
                 <div className="flex items-center gap-2">
                   <span>
                     <strong>{g.accession}</strong> — {g.description}
-                    {g.existsInDB && " (from DB)"}
                   </span>
 
                   {/* Trash icon */}
@@ -901,7 +905,6 @@ export default function Step2GenomeTF() {
                 <div className="flex items-center gap-2">
                   <span>
                     <strong>{u.accession}</strong> — {u.description}
-                    {u.existsInDB && " (from DB)"}
                   </span>
 
                   <button
@@ -935,7 +938,7 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF NCBI RefSeq accession</h3>
         <p className="text-sm text-muted">
-          Enter RefSeq TF protein accession (e.g. NP_799324).
+          Enter RefSeq TF protein accession (e.g. WP_000037239).
         </p>
 
         <input
@@ -972,7 +975,6 @@ export default function Step2GenomeTF() {
                 <div className="flex items-center gap-2">
                   <span>
                     <strong>{r.accession}</strong> — {r.description}
-                    {r.existsInDB && " (from DB)"}
                   </span>
 
                   <button

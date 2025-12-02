@@ -170,7 +170,7 @@ export default function Step3ExperimentalMethods() {
           />
 
           <button className="btn" onClick={handleAddTechnique}>
-            Add technique
+            + Add technique
           </button>
         </div>
 
