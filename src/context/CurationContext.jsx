@@ -11,17 +11,15 @@ export function useCuration() {
 
 export function CurationProvider({ children }) {
   const [currentStep, setCurrentStep] = useState(1); //currentStep per a guardar el step en el que estem, al principi el 1
+  
   const [publication, setPublication] = useState(null); //guardem la publication del step1, al principi null
 
-  // TF seleccionat o creat al Step2
   const [tf, setTf] = useState(null); //TF step2
-
-  const [genomeList, setGenomeList] = useState([]); // [{accession, description, organism, existsInDB}]
-  const [uniprotList, setUniprotList] = useState([]); // [{accession, description, organism, existsInDB, linkedRefseq}]
-  const [refseqList, setRefseqList] = useState([]); // [{accession, description, organism, existsInDB}]
-
-  const [strainData, setStrainData] = useState({
-    sameStrainGenome: false,
+  const [genomeList, setGenomeList] = useState([]); // llistes accession numbers
+  const [uniprotList, setUniprotList] = useState([]);
+  const [refseqList, setRefseqList] = useState([]); 
+  const [strainData, setStrainData] = useState({ 
+    sameStrainGenome: false, //checkboxes
     sameStrainTF: false,
     organismTFBindingSites: "",
     organismReportedTF: "",
@@ -29,11 +27,10 @@ export function CurationProvider({ children }) {
     expressionInfo: false,
   });
 
-  // Tècniques del Step3
-  const [techniques, setTechniques] = useState([]);
+  const [techniques, setTechniques] = useState([]); //Tècniques del Step3
 
-  const goToNextStep = () => setCurrentStep((s) => s + 1);
-  const goToStep = (n) => setCurrentStep(n);
+  const goToNextStep = () => setCurrentStep((s) => s + 1); //anar al següent pas
+  const goToStep = (n) => setCurrentStep(n); //anar a qualsevol pas
 
   return (
     <CurationContext.Provider
@@ -42,7 +39,7 @@ export function CurationProvider({ children }) {
         goToStep,
         goToNextStep,
         publication,
-        setPublication,
+        setPublication, 
         tf,
         setTf,
         techniques,

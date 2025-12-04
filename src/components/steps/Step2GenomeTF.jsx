@@ -21,13 +21,12 @@ export default function Step2GenomeTF() {
     goToNextStep,
   } = useCuration();
 
-  // ---------------- TF ----------------
+  //TF 
   const [searchName, setSearchName] = useState("");
   const [suggestions, setSuggestions] = useState([]);
-
-  const [tfRow, setTfRow] = useState(null);
+  const [tfRow, setTfRow] = useState(null); //nombre TF completo
+  
   const [showCreateForm, setShowCreateForm] = useState(false);
-
   const [newTFName, setNewTFName] = useState("");
   const [tfDesc, setTfDesc] = useState("");
 
@@ -39,24 +38,24 @@ export default function Step2GenomeTF() {
 
   const [finalError, setFinalError] = useState("");
 
-  // ---------------- Genome ----------------
-  const [genomeInput, setGenomeInput] = useState("");
-  const [genomeSuggestions, setGenomeSuggestions] = useState([]);
-  const [genomeItems, setGenomeItems] = useState([]);
+  //Genome
+  const [genomeInput, setGenomeInput] = useState(""); //búsqueda
+  const [genomeSuggestions, setGenomeSuggestions] = useState([]); //suggerencies
+  const [genomeItems, setGenomeItems] = useState([]); //llista
 
-  // ---------------- UniProt ----------------
+  //UniProt
   const [uniprotInput, setUniprotInput] = useState("");
   const [uniprotSuggestions, setUniprotSuggestions] = useState([]);
   const [uniProtItems, setUniProtItems] = useState([]);
 
-  // ---------------- RefSeq ----------------
+  //RefSeq
   const [refseqInput, setRefseqInput] = useState("");
   const [refseqSuggestions, setRefseqSuggestions] = useState([]);
   const [refseqItems, setRefseqItems] = useState([]);
 
-  // ---------------- Checkboxes + extra fields ----------------
-  const [sameStrainGenome, setSameStrainGenome] = useState(false);
-  const [bindingOrganism, setBindingOrganism] = useState("");
+  //Checkboxes
+  const [sameStrainGenome, setSameStrainGenome] = useState(false); //checkbox
+  const [bindingOrganism, setBindingOrganism] = useState(""); //input si no está seleccionado
 
   const [sameStrainTF, setSameStrainTF] = useState(false);
   const [reportedTFOrganism, setReportedTFOrganism] = useState("");
@@ -64,12 +63,7 @@ export default function Step2GenomeTF() {
   const [promoterInfo, setPromoterInfo] = useState(false);
   const [expressionInfo, setExpressionInfo] = useState(false);
 
-  // Escape SQL
-  function esc(s) {
-    return String(s || "").replace(/'/g, "''");
-  }
-
-  // ---------------- RESTORE FROM CONTEXT ----------------
+  //Restaura les dades si tornem al step2
   useEffect(() => {
     if (tf) {
       if (tf.TF_id) {
@@ -101,7 +95,7 @@ export default function Step2GenomeTF() {
     }
   }, []);
 
-  // ---------------- LOAD FAMILIES ----------------
+  //Load families de la base de dades
   useEffect(() => {
     async function loadFamilies() {
       const rows = await runQuery(`
@@ -113,9 +107,7 @@ export default function Step2GenomeTF() {
     loadFamilies();
   }, []);
 
-  // ============================================================
-  // TF AUTOCOMPLETE
-  // ============================================================
+  //Autocompletar TF
   async function handleAutocompleteTF(val) {
     setSearchName(val);
     setTfRow(null);
@@ -140,9 +132,7 @@ export default function Step2GenomeTF() {
     setSuggestions(rows);
   }
 
-  // ============================================================
-  // When selecting from autocomplete → load full TF
-  // ============================================================
+  //Carrega el TF quan s'autocompleta
   async function loadTF(name) {
     const rows = await runQuery(
       `
@@ -157,7 +147,7 @@ export default function Step2GenomeTF() {
 
     if (rows.length) {
       setTfRow(rows[0]);
-      setTf(rows[0]); // save to context
+      setTf(rows[0]);
       setShowCreateForm(false);
     } else {
       setTfRow(null);
@@ -166,9 +156,7 @@ export default function Step2GenomeTF() {
     }
   }
 
-  // ============================================================
-  // CREATE NEW TF (NO DEPLOY YET)
-  // ============================================================
+  //Crear nou TF (NO DEPLOY YET)
   function saveNewTF() {
     setFinalError("");
 
@@ -212,9 +200,7 @@ export default function Step2GenomeTF() {
     setShowCreateForm(false);
   }
 
-  // ============================================================
-  // GENOME AUTOCOMPLETE + AUTO-ADD ON SELECT
-  // ============================================================
+  //Autocompletar Genome + Auto-add al seleccionar
   async function handleAutocompleteGenome(val) {
     setGenomeInput(val);
 
@@ -236,7 +222,7 @@ export default function Step2GenomeTF() {
   }
 
   async function addGenomeItem(accession, description, organism) {
-    // prevent duplicates
+    //evitar duplicats
     if (genomeItems.some((x) => x.accession === accession)) return;
 
     const updated = [
@@ -252,16 +238,14 @@ export default function Step2GenomeTF() {
     setGenomeList(updated);
   }
 
-  // on select suggestion
+  //al select la suggestion
   function selectGenomeSuggestion(g) {
     addGenomeItem(g.genome_accession, g.organism, g.organism, true);
     setGenomeSuggestions([]);
     setGenomeInput("");
   }
 
-  // ============================================================
-  // UNIPROT AUTOCOMPLETE + AUTO-ADD ON SELECT
-  // ============================================================
+  //Autocompletar UniProt + Auto-add al seleccionar
   async function handleAutocompleteUniprot(val) {
     setUniprotInput(val);
 
@@ -310,9 +294,7 @@ export default function Step2GenomeTF() {
     setUniprotInput("");
   }
 
-  // ============================================================
-  // REFSEQ AUTOCOMPLETE + AUTO-ADD ON SELECT
-  // ============================================================
+  //Autocompletar RefSeq + Auto-add al seleccionar
   async function handleAutocompleteRefseq(val) {
     setRefseqInput(val);
 
@@ -353,9 +335,7 @@ export default function Step2GenomeTF() {
     setRefseqInput("");
   }
 
-  // ============================================================
-  // EXTERNAL APIS (per afegir codis no presents a la DB)
-  // ============================================================
+  //Buscar Genoma a la API nuccore
   async function fetchNuccoreSummary(acc) {
     const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(
       acc
@@ -374,6 +354,7 @@ export default function Step2GenomeTF() {
     return { title: rec.title, organism: rec.organism };
   }
 
+  //Buscar UniProt a la API Rest UniProt
   async function fetchUniprotSummary(acc) {
     try {
       const url = `${UNIPROT_BASE}/${encodeURIComponent(acc)}.json`;
@@ -395,6 +376,7 @@ export default function Step2GenomeTF() {
     }
   }
 
+  //Buscar RefSeq a la API Entrez
   async function fetchProteinSummary(acc) {
     const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=protein&retmode=json&term=${encodeURIComponent(
       acc
@@ -412,9 +394,7 @@ export default function Step2GenomeTF() {
     return rec ? { title: rec.title } : null;
   }
 
-  // ============================================================
-  // ENTER → ADD MANUAL ACCESSION SI NO ESTÀ A LA DB
-  // ============================================================
+  //Llegir input. Si està a la DB ho mostra, si no, executa la funció de la API
   async function handleGenomeEnter() {
     const acc = genomeInput.trim();
     if (!acc) return;
@@ -449,7 +429,8 @@ export default function Step2GenomeTF() {
     setGenomeInput("");
     setGenomeSuggestions([]);
   }
-
+  
+  //Llegir input. Si està a la DB ho mostra, si no, executa la funció de la API
   async function handleUniprotEnter() {
     const acc = uniprotInput.trim();
     if (!acc) return;
@@ -493,6 +474,7 @@ export default function Step2GenomeTF() {
     setUniprotSuggestions([]);
   }
 
+  //Llegir input. Si està a la DB ho mostra, si no, executa la funció de la API
   async function handleRefseqEnter() {
     const acc = refseqInput.trim();
     if (!acc) return;
@@ -528,9 +510,7 @@ export default function Step2GenomeTF() {
     setRefseqSuggestions([]);
   }
 
-  // ============================================================
-  // REMOVE ICONS (GENOME / UNIPROT / REFSEQ)
-  // ============================================================
+  //Remove icons (GENOME / UNIPROT / REFSEQ)
   function removeGenome(index) {
     const updated = genomeItems.filter((_, i) => i !== index);
     setGenomeItems(updated);
@@ -549,9 +529,7 @@ export default function Step2GenomeTF() {
     setRefseqList(updated);
   }
 
-  // ============================================================
-  // FINAL CONFIRM
-  // ============================================================
+  //Missatges d'error si algún camp està buit
   function handleFinalConfirm() {
     setFinalError("");
 
@@ -604,14 +582,12 @@ export default function Step2GenomeTF() {
     goToNextStep();
   }
 
-  // ============================================================
-  // RENDER
-  // ============================================================
+  //RENDER
   return (
     <div className="space-y-8">
       <h2 className="text-2xl font-bold">Step 2 – Genome & TF</h2>
 
-      {/* ---------------- TF NAME ---------------- */}
+      {/* TF NAME */}
       <div className="space-y-2">
         <label className="block font-medium">TF Name</label>
 
@@ -655,7 +631,7 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/* ---------------- EXISTING TF ---------------- */}
+      {/* EXISTING TF */}
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
@@ -675,7 +651,7 @@ export default function Step2GenomeTF() {
         </div>
       )}
 
-      {/* ---------------- CREATE TF ---------------- */}
+      {/*  CREATE TF  */}
       {showCreateForm && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Create New TF</h3>
@@ -760,7 +736,7 @@ export default function Step2GenomeTF() {
         </div>
       )}
 
-      {/* ---------------- GENOME ---------------- */}
+      {/*  GENOME  */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Genome NCBI accession number</h3>
         <p className="text-sm text-muted">
@@ -831,7 +807,7 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* checkbox AFTER list and BEFORE organism field */}
+        {/* checkbox AFTER genome */}
         <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
@@ -864,7 +840,7 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/* ---------------- UNIPROT ---------------- */}
+      {/*  UNIPROT  */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF UniProt accession number</h3>
         <p className="text-sm text-muted">
@@ -934,7 +910,7 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/* ---------------- REFSEQ ---------------- */}
+      {/*  REFSEQ  */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF NCBI RefSeq accession</h3>
         <p className="text-sm text-muted">
@@ -1003,7 +979,7 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* checkbox AFTER list and BEFORE organism field */}
+        {/* checkbox AFTER refseq */}
         <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
@@ -1036,7 +1012,7 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/* ---------------- PROMOTER / EXPRESSION ---------------- */}
+      {/*  PROMOTER / EXPRESSION  */}
       <div className="space-y-3 text-sm">
         <label className="flex items-start gap-2">
           <input
@@ -1069,7 +1045,7 @@ export default function Step2GenomeTF() {
         </label>
       </div>
 
-      {/* ---------------- FINAL BUTTON ---------------- */}
+      {/*  FINAL BUTTON  */}
       <div className="mt-6">
         <button className="btn" onClick={handleFinalConfirm}>
           Confirm and continue →

@@ -5,7 +5,7 @@ import { useCuration } from "../../context/CurationContext";
 export default function StepNavigation() {
   const { currentStep, goToStep } = useCuration();
 
-  const steps = ["Publication","Genome & TF", "Experimental Methods","Reported Sites", "Annotation", "Gene Regulation", "Finalize",];
+  const steps = ["Publication","Genome and TF information", "Experimental Methods","Reported Sites", "Site annotation", "Gene Regulation", "Curation information",];
 
   return (
     <div className="mb-8">

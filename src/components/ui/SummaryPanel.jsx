@@ -1,7 +1,7 @@
 import { useCuration } from "../../context/CurationContext";
 
 export default function SummaryPanel() {
-  const {
+  const { //importem la info necessaria
     publication,
     tf,
     genomeList,
@@ -15,7 +15,7 @@ export default function SummaryPanel() {
   const firstUniProt = uniprotList[0];
   const firstRefseq = refseqList[0];
 
-  return (
+  return ( //mostrem la info 
     <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 w-72">
       <h3 className="text-xl font-bold mb-3 text-accent">Summary</h3>
 
@@ -56,7 +56,7 @@ export default function SummaryPanel() {
         )}
       </div>
 
-      {/* GENOME & TF ACCESSIONS */}
+      {/* GENOME & ACCESSION NUMBERS*/}
       <div className="mb-4">
         <h4 className="font-semibold text-sky-300">Genome & TF accessions</h4>
         {firstGenome || firstUniProt || firstRefseq ? (

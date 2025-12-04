@@ -4,15 +4,15 @@ import { useCuration } from "../../context/CurationContext";
 export default function Step1Publication() {
   const { publication, setPublication, goToNextStep } = useCuration();
 
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState(""); //input
+  const [loading, setLoading] = useState(false); //si està buscant
   const [article, setArticle] = useState(null);
   const [error, setError] = useState("");
 
   const PROXY = "https://corsproxy.io/?";
   const BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
-  useEffect(() => {
+  useEffect(() => { //mostra dades al anar enrere
     if (publication) {
       setArticle(publication);
       if (publication.pmid) setQuery(publication.pmid);
@@ -35,7 +35,7 @@ export default function Step1Publication() {
       const isPMID = /^\d+$/.test(q);
       const isDOI = q.includes("/");
 
-      // Si no parece ni PMID ni DOI → error directo
+      // Si no parece ni PMID ni DOI → error
       if (!isPMID && !isDOI) {
         throw new Error(
           "Please enter a valid PMID or DOI. For title searches use the PubMed link below."
@@ -93,7 +93,7 @@ export default function Step1Publication() {
       setArticle(data);
     } catch (e) {
       console.error(e);
-      setError("Error searching the article.");
+      setError("Error searching the article, please introduce a valid PubMedID or DOI.");
     } finally {
       setLoading(false);
     }
@@ -123,7 +123,7 @@ export default function Step1Publication() {
       </div>
 
       <a
-        href="https://pubmed.ncbi.nlm.nih.gov/"
+        href="https://pubmed.ncbi.nlm.nih.gov/" //enllaç a pubmed
         target="_blank"
         rel="noopener noreferrer"
         className="inline-block text-sm text-blue-400 hover:text-blue-300 underline mt-1"
@@ -159,6 +159,6 @@ export default function Step1Publication() {
           </div>
         </div>
       )}
-    </div>
+    </div> 
   );
 }
