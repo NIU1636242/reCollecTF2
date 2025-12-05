@@ -12,6 +12,8 @@ export default function Step4ReportedSites() {
   // UI STATES
   // ================================
 
+  const [siteType, setSiteType] = useState("motif-associated");
+
   const [expanded, setExpanded] = useState({
     step1: true,
     step2: false,
@@ -210,24 +212,75 @@ export default function Step4ReportedSites() {
       {/* =========================== */}
 
       <Acordeon
-        title="1. Enter reported sites"
-        open={expanded.step1}
-        toggle={() => toggle("step1")}
-      >
-        <textarea
-          className="w-full h-36 bg-black/60 border border-gray-600 rounded p-2 text-sm"
-          value={siteInput}
-          onChange={e => setSiteInput(e.target.value)}
-          placeholder="One sequence per line (e.g., AAGATTACATT)"
-        />
+  title="1. Enter reported sites"
+  open={expanded.step1}
+  toggle={() => toggle("step1")}
+>
+  {/* ---------- SITE TYPE ---------- */}
 
-        <button
-          className="px-4 py-2 bg-blue-600 rounded mt-3"
-          onClick={parseSites}
-        >
-          Parse
-        </button>
-      </Acordeon>
+  <div className="flex flex-col space-y-3 mb-4">
+    <label className="font-semibold text-sm">Site type</label>
+
+    <label className="flex items-center space-x-2 text-sm cursor-pointer">
+      <input
+        type="radio"
+        name="siteType"
+        value="motif-associated"
+        checked={siteType === "motif-associated"}
+        onChange={e => setSiteType(e.target.value)}
+      />
+      <span>motif-associated (new motif)</span>
+    </label>
+
+    <label className="flex items-center space-x-2 text-sm cursor-pointer">
+      <input
+        type="radio"
+        name="siteType"
+        value="variable-motif-associated"
+        checked={siteType === "variable-motif-associated"}
+        onChange={e => setSiteType(e.target.value)}
+      />
+      <span>variable motif associated</span>
+    </label>
+
+    <label className="flex items-center space-x-2 text-sm cursor-pointer">
+      <input
+        type="radio"
+        name="siteType"
+        value="non-motif-associated"
+        checked={siteType === "non-motif-associated"}
+        onChange={e => setSiteType(e.target.value)}
+      />
+      <span>non-motif associated</span>
+    </label>
+
+    <a
+      href="#"
+      className="text-xs text-sky-400 hover:text-sky-300 underline"
+    >
+      [motif examples]
+    </a>
+  </div>
+
+  {/* ---------- SITES TEXTAREA ---------- */}
+
+  <label className="font-semibold text-sm">Sites</label>
+
+  <textarea
+    className="w-full h-36 bg-black/60 border border-gray-600 rounded p-2 text-sm"
+    value={siteInput}
+    onChange={e => setSiteInput(e.target.value)}
+    placeholder="One site per line (e.g., AAGATTACATT)"
+  />
+
+  <button
+    className="px-4 py-2 bg-blue-600 rounded mt-3"
+    onClick={parseSites}
+  >
+    Parse
+  </button>
+</Acordeon>
+
 
       {/* =========================== */}
       {/* STEP 2: EXACT MATCHES       */}
