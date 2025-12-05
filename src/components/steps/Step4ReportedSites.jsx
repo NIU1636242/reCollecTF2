@@ -1,438 +1,319 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
+import { runQuery } from "../../db/queryExecutor";
 import { useCuration } from "../../context/CurationContext";
 
-const PROXY = "https://corsproxy.io/?";
-const NCBI = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
+// ------------------------------------------------------------
+// REVERSE COMPLEMENT
+// ------------------------------------------------------------
+function revComp(seq) {
+  const map = { A: "T", T: "A", C: "G", G: "C" };
+  return seq
+    .split("")
+    .reverse()
+    .map((n) => map[n] || "N")
+    .join("");
+}
+
+// ------------------------------------------------------------
+// SEARCH EXACT MATCHES
+// ------------------------------------------------------------
+function findMatches(genomeSeq, reportedSeq) {
+  const seq = reportedSeq.toUpperCase();
+  const rev = revComp(seq);
+  const len = seq.length;
+
+  const results = [];
+
+  // forward strand
+  let i = genomeSeq.indexOf(seq);
+  while (i !== -1) {
+    results.push({
+      seq,
+      reportedSeq,
+      start: i,
+      end: i + len - 1,
+      strand: "+",
+    });
+    i = genomeSeq.indexOf(seq, i + 1);
+  }
+
+  // reverse strand
+  let j = genomeSeq.indexOf(rev);
+  while (j !== -1) {
+    results.push({
+      seq: rev,
+      reportedSeq,
+      start: j,
+      end: j + len - 1,
+      strand: "-",
+    });
+    j = genomeSeq.indexOf(rev, j + 1);
+  }
+
+  return results;
+}
 
 export default function Step4ReportedSites() {
-
   const { genomeList } = useCuration();
 
-  // ================================
-  // UI STATES
-  // ================================
-
-  const [siteType, setSiteType] = useState("motif-associated");
-
-  const [expanded, setExpanded] = useState({
+  const [accordionOpen, setAccordionOpen] = useState({
     step1: true,
     step2: false,
     step3: false,
     step4: false,
   });
 
-  const [siteInput, setSiteInput] = useState("");
-  const [parsedSites, setParsedSites] = useState([]);
+  const [siteType, setSiteType] = useState("motif");
+  const [rawInput, setRawInput] = useState("");
 
-  const [genomeSequences, setGenomeSequences] = useState({});
-  const [exactMatches, setExactMatches] = useState([]);
+  const [sites, setSites] = useState([]);
+  const [matches, setMatches] = useState([]);
 
-  const [loadingGenomes, setLoadingGenomes] = useState(false);
-  const [loadingExact, setLoadingExact] = useState(false);
+  const [loadedGenomes, setLoadedGenomes] = useState({});
 
-  // ================================
-  // DNA UTILITIES
-  // ================================
+  // ------------------------------------------------------------
+  // LOAD FASTA for selected genomes
+  // ------------------------------------------------------------
+  async function fetchGenome(accession) {
+    const url = `https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/accession/${accession}/download?include=sequence&filename=seq.fasta`;
 
-  function revComp(seq) {
-    const map = { A: "T", T: "A", C: "G", G: "C" };
-    return seq
-      .split("")
-      .reverse()
-      .map(n => map[n] || "N")
-      .join("");
-  }
+    try {
+      const r = await fetch(url);
+      const blob = await r.blob();
+      const text = await blob.text();
 
-  // ================================
-  // DOWNLOAD GENOMES
-  // ================================
+      // parse FASTA
+      const seq = text
+        .split("\n")
+        .filter((l) => !l.startsWith(">"))
+        .join("")
+        .toUpperCase();
 
-  async function fetchGenome(acc) {
-    const url = `${NCBI}/efetch.fcgi?db=nuccore&id=${acc}&rettype=fasta&retmode=text`;
-    const res = await fetch(PROXY + encodeURIComponent(url));
-    const txt = await res.text();
-
-    const seq = txt
-      .split("\n")
-      .filter(l => !l.startsWith(">"))
-      .join("")
-      .toUpperCase();
-
-    return seq;
-  }
-
-  async function loadGenomes() {
-    if (!genomeList.length) return;
-
-    setLoadingGenomes(true);
-    const result = {};
-
-    for (const g of genomeList) {
-      try {
-        const seq = await fetchGenome(g.accession);
-        result[g.accession] = seq;
-      } catch (err) {
-        console.error("Error loading genome", g.accession);
-      }
+      return seq;
+    } catch (err) {
+      console.error("Error fetching genome FASTA", accession, err);
+      return null;
     }
-
-    console.log("Loaded genomes:", result);
-    setGenomeSequences(result);
-    setLoadingGenomes(false);
   }
 
   useEffect(() => {
+    async function loadGenomes() {
+      if (!genomeList?.length) return;
+
+      const store = {};
+
+      for (const g of genomeList) {
+        const acc = g.accession;
+        const seq = await fetchGenome(acc);
+        if (seq) store[acc] = seq;
+      }
+
+      setLoadedGenomes(store);
+      console.log("Loaded genomes:", store);
+    }
+
     loadGenomes();
   }, [genomeList]);
 
-  // ================================
-  // STEP 1: PARSE SITES
-  // ================================
+  // ------------------------------------------------------------
+  // Step1: Parse input + auto search matches
+  // ------------------------------------------------------------
+  function handleParse() {
+    const seqs = rawInput
+      .split(/\r?\n/)
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length > 0);
 
-  function parseSites() {
-    const arr = siteInput
-      .split("\n")
-      .map(s => s.trim().toUpperCase())
-      .filter(Boolean);
+    setSites(seqs);
 
-    setParsedSites(arr);
+    // search automatically
+    runExactMatchSearch(seqs);
 
-    setExpanded({ step1: false, step2: true, step3: false, step4: false });
+    // open accordion 2 automatically
+    setAccordionOpen({
+      step1: true, // or false if you want collapse
+      step2: true,
+      step3: false,
+      step4: false,
+    });
   }
 
-  // ================================
-  // EXACT MATCH SEARCH
-  // ================================
-
-  function findExactMatches(seq, genomeSeq, accession) {
-    const result = [];
-    const len = seq.length;
-
-    // forward
-    let i = genomeSeq.indexOf(seq);
-    while (i >= 0) {
-      result.push({
-        site: seq,
-        accession,
-        start: i,
-        end: i + len,
-        strand: "+",
-        TF_type: "monomer",
-        TF_function: "activator",
-        techniques: [],
-        selected: false,
-      });
-      i = genomeSeq.indexOf(seq, i + 1);
+  // ------------------------------------------------------------
+  // Step 2: Find matches
+  // ------------------------------------------------------------
+  function runExactMatchSearch(seqs) {
+    if (!Object.keys(loadedGenomes).length) {
+      console.log("No genomes loaded yet");
+      return;
     }
 
-    // reverse
-    const rc = revComp(seq);
-    let j = genomeSeq.indexOf(rc);
-    while (j >= 0) {
-      result.push({
-        site: seq,
-        accession,
-        start: j,
-        end: j + len,
-        strand: "-",
-        TF_type: "monomer",
-        TF_function: "activator",
-        techniques: [],
-        selected: false,
-      });
-      j = genomeSeq.indexOf(rc, j + 1);
-    }
+    const allMatches = [];
 
-    return result;
-  }
+    for (const seq of seqs) {
+      for (const [acc, genomeSeq] of Object.entries(loadedGenomes)) {
+        const hits = findMatches(genomeSeq, seq);
 
-  function runExact() {
-    if (!parsedSites.length) return;
-
-    setLoadingExact(true);
-    const all = [];
-
-    for (const s of parsedSites) {
-      for (const [acc, seq] of Object.entries(genomeSequences)) {
-        const f = findExactMatches(s, seq, acc);
-        all.push(...f);
+        hits.forEach((hit) => {
+          allMatches.push({
+            accession: acc,
+            ...hit,
+          });
+        });
       }
     }
 
-    console.log("Exact matches:", all);
-    setExactMatches(all);
-    setLoadingExact(false);
-
-    setExpanded({ step1: false, step2: true, step3: true, step4: true });
+    setMatches(allMatches);
   }
 
-  // ================================
+  // ------------------------------------------------------------
   // UI HELPERS
-  // ================================
-
-  function toggle(key) {
-    setExpanded(s => ({ ...s, [key]: !s[key] }));
+  // ------------------------------------------------------------
+  function toggleAccordion(step) {
+    setAccordionOpen((prev) => ({
+      ...prev,
+      [step]: !prev[step],
+    }));
   }
 
-  function toggleSelect(i) {
-    setExactMatches(arr =>
-      arr.map((m, idx) =>
-        idx === i ? { ...m, selected: !m.selected } : m
-      )
-    );
-  }
-
-  function setField(i, field, val) {
-    setExactMatches(arr =>
-      arr.map((m, idx) =>
-        idx === i ? { ...m, [field]: val } : m
-      )
-    );
-  }
-
-  function applyToSelected(field, value) {
-    setExactMatches(arr =>
-      arr.map(m =>
-        m.selected ? { ...m, [field]: value } : m
-      )
-    );
-  }
-
-  // ================================
-  // UI
-  // ================================
-
+  // ------------------------------------------------------------
+  // RENDER
+  // ------------------------------------------------------------
   return (
-    <div className="space-y-6">
-
+    <div className="space-y-8">
       <h2 className="text-2xl font-bold">Step 4 – Reported sites</h2>
 
-      {/* =========================== */}
-      {/* STEP 1: INPUT & PARSE       */}
-      {/* =========================== */}
-
-      <Acordeon
-  title="1. Enter reported sites"
-  open={expanded.step1}
-  toggle={() => toggle("step1")}
->
-  {/* ---------- SITE TYPE ---------- */}
-
-  <div className="flex flex-col space-y-3 mb-4">
-    <label className="font-semibold text-sm">Site type</label>
-
-    <label className="flex items-center space-x-2 text-sm cursor-pointer">
-      <input
-        type="radio"
-        name="siteType"
-        value="motif-associated"
-        checked={siteType === "motif-associated"}
-        onChange={e => setSiteType(e.target.value)}
-      />
-      <span>motif-associated (new motif)</span>
-    </label>
-
-    <label className="flex items-center space-x-2 text-sm cursor-pointer">
-      <input
-        type="radio"
-        name="siteType"
-        value="variable-motif-associated"
-        checked={siteType === "variable-motif-associated"}
-        onChange={e => setSiteType(e.target.value)}
-      />
-      <span>variable motif associated</span>
-    </label>
-
-    <label className="flex items-center space-x-2 text-sm cursor-pointer">
-      <input
-        type="radio"
-        name="siteType"
-        value="non-motif-associated"
-        checked={siteType === "non-motif-associated"}
-        onChange={e => setSiteType(e.target.value)}
-      />
-      <span>non-motif associated</span>
-    </label>
-
-    <a
-      href="#"
-      className="text-xs text-sky-400 hover:text-sky-300 underline"
-    >
-      [motif examples]
-    </a>
-  </div>
-
-  {/* ---------- SITES TEXTAREA ---------- */}
-
-  <label className="font-semibold text-sm">Sites</label>
-
-  <textarea
-    className="w-full h-36 bg-black/60 border border-gray-600 rounded p-2 text-sm"
-    value={siteInput}
-    onChange={e => setSiteInput(e.target.value)}
-    placeholder="One site per line (e.g., AAGATTACATT)"
-  />
-
-  <button
-    className="px-4 py-2 bg-blue-600 rounded mt-3"
-    onClick={parseSites}
-  >
-    Parse
-  </button>
-</Acordeon>
-
-
-      {/* =========================== */}
-      {/* STEP 2: EXACT MATCHES       */}
-      {/* =========================== */}
-
-      <Acordeon
-        title="2. Exact site matches"
-        open={expanded.step2}
-        toggle={() => toggle("step2")}
-      >
-
+      {/* ---------------------------------------------------------
+          ACCORDION 1
+      ---------------------------------------------------------- */}
+      <div className="bg-surface border border-border rounded p-4">
         <button
-          className="px-4 py-2 bg-blue-600 rounded"
-          onClick={runExact}
-          disabled={loadingExact || loadingGenomes}
+          className="flex justify-between w-full text-lg font-semibold mb-3"
+          onClick={() => toggleAccordion("step1")}
         >
-          {loadingExact ? "Searching..." : "Search exact matches"}
+          <span>1. Enter reported sites</span>
+          <span>{accordionOpen.step1 ? "▲" : "▼"}</span>
         </button>
 
-        <div className="mt-2 text-sm text-gray-400">
-          {exactMatches.length} matches found.
-        </div>
+        {accordionOpen.step1 && (
+          <div className="space-y-4">
+            {/* SITE TYPE */}
+            <div>
+              <label className="block font-medium mb-1">Site type</label>
 
-      </Acordeon>
+              <div className="space-y-1 text-sm">
+                <label className="flex gap-2 items-center">
+                  <input
+                    type="radio"
+                    checked={siteType === "motif"}
+                    onChange={() => setSiteType("motif")}
+                  />
+                  motif-associated (new motif)
+                </label>
 
-      {/* =========================== */}
-      {/* STEP 3: INEXACT MATCHES     */}
-      {/* =========================== */}
+                <label className="flex gap-2 items-center">
+                  <input
+                    type="radio"
+                    checked={siteType === "variable"}
+                    onChange={() => setSiteType("variable")}
+                  />
+                  variable motif associated
+                </label>
 
-      <Acordeon
-        title="3. Inexact matches (mismatches)"
-        open={expanded.step3}
-        toggle={() => toggle("step3")}
-      >
+                <label className="flex gap-2 items-center">
+                  <input
+                    type="radio"
+                    checked={siteType === "nonmotif"}
+                    onChange={() => setSiteType("nonmotif")}
+                  />
+                  non-motif associated
+                </label>
+              </div>
+            </div>
 
-        <div className="text-gray-400 italic">
-          Not implemented yet
-        </div>
+            {/* SITES INPUT */}
+            <div>
+              <label className="block font-medium mb-1">Sites</label>
+              <textarea
+                className="form-control w-full h-40"
+                value={rawInput}
+                onChange={(e) => setRawInput(e.target.value)}
+                placeholder="AAGATTACATT\nAAGATAACATT"
+              />
+            </div>
 
-      </Acordeon>
-
-      {/* =========================== */}
-      {/* STEP 4: ANNOTATION UI       */}
-      {/* =========================== */}
-
-      <Acordeon
-        title="4. Annotate sites"
-        open={expanded.step4}
-        toggle={() => toggle("step4")}
-      >
-
-        {exactMatches.length === 0 ? (
-          <p className="text-gray-400 italic text-sm">
-            No matches found yet.
-          </p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Site</th>
-                <th>TF-type</th>
-                <th>TF-function</th>
-              </tr>
-            </thead>
-            <tbody>
-              {exactMatches.map((m, i) => (
-                <tr key={i} className="border-t border-gray-700">
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={m.selected}
-                      onChange={() => toggleSelect(i)}
-                    />
-                  </td>
-                  <td>
-                    <div className="font-mono">{m.site}</div>
-                    <small className="text-gray-400">
-                      {m.start}–{m.end} {m.strand} ({m.accession})
-                    </small>
-                  </td>
-
-                  <td>
-                    <select
-                      value={m.TF_type}
-                      onChange={e => setField(i, "TF_type", e.target.value)}
-                      className="bg-black border border-gray-600 rounded p-1"
-                    >
-                      <option>monomer</option>
-                      <option>dimer</option>
-                      <option>multimer</option>
-                    </select>
-                  </td>
-
-                  <td>
-                    <select
-                      value={m.TF_function}
-                      onChange={e =>
-                        setField(i, "TF_function", e.target.value)
-                      }
-                      className="bg-black border border-gray-600 rounded p-1"
-                    >
-                      <option>activator</option>
-                      <option>repressor</option>
-                    </select>
-                  </td>
-
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        {exactMatches.some(m => m.selected) && (
-          <div className="mt-3 space-x-2 text-xs">
-            <button
-              className="px-2 py-1 bg-sky-600 rounded"
-              onClick={() => applyToSelected("TF_type", "monomer")}
-            >
-              Apply TF-type
-            </button>
-            <button
-              className="px-2 py-1 bg-sky-600 rounded"
-              onClick={() => applyToSelected("TF_function", "activator")}
-            >
-              Apply TF-function
+            <button className="btn" onClick={handleParse}>
+              Save
             </button>
           </div>
         )}
-      </Acordeon>
-
-    </div>
-  );
-}
-
-
-// ===========================================
-// REUSABLE ACCORDION COMPONENT
-// ===========================================
-function Acordeon({ title, open, toggle, children }) {
-  return (
-    <div className="border border-gray-600 p-4 rounded bg-black/40">
-
-      <div
-        className="flex justify-between cursor-pointer"
-        onClick={toggle}
-      >
-        <h3 className="text-xl font-semibold">{title}</h3>
-        <span>{open ? "▲" : "▼"}</span>
       </div>
 
-      {open && <div className="mt-4 space-y-4">{children}</div>}
+      {/* ---------------------------------------------------------
+          ACCORDION 2
+      ---------------------------------------------------------- */}
+      <div className="bg-surface border border-border rounded p-4">
+        <button
+          className="flex justify-between w-full text-lg font-semibold mb-3"
+          onClick={() => toggleAccordion("step2")}
+        >
+          <span>2. Exact site matches</span>
+          <span>{accordionOpen.step2 ? "▲" : "▼"}</span>
+        </button>
+
+        {accordionOpen.step2 && (
+          <div className="space-y-2 text-sm">
+            {matches.length === 0 && (
+              <p className="text-muted">No matches found.</p>
+            )}
+
+            {matches.map((m, i) => (
+              <div
+                key={i}
+                className="p-2 border border-border rounded bg-muted"
+              >
+                <p className="font-medium">{m.reportedSeq}</p>
+                <p>
+                  {m.accession}: [{m.start} – {m.end}] ({m.strand})
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ---------------------------------------------------------
+          ACCORDION 3 (PLACEHOLDER)
+      ---------------------------------------------------------- */}
+      <div className="bg-surface border border-border rounded p-4 opacity-40">
+        <button
+          className="flex justify-between w-full text-lg font-semibold mb-3"
+          onClick={() => toggleAccordion("step3")}
+        >
+          <span>3. Inexact matches</span>
+          <span>{accordionOpen.step3 ? "▲" : "▼"}</span>
+        </button>
+
+        {accordionOpen.step3 && (
+          <p className="text-sm text-muted">Not implemented yet.</p>
+        )}
+      </div>
+
+      {/* ---------------------------------------------------------
+          ACCORDION 4 (PLACEHOLDER)
+      ---------------------------------------------------------- */}
+      <div className="bg-surface border border-border rounded p-4 opacity-40">
+        <button
+          className="flex justify-between w-full text-lg font-semibold mb-3"
+          onClick={() => toggleAccordion("step4")}
+        >
+          <span>4. Annotate sites</span>
+          <span>{accordionOpen.step4 ? "▲" : "▼"}</span>
+        </button>
+
+        {accordionOpen.step4 && (
+          <p className="text-sm text-muted">Not implemented yet.</p>
+        )}
+      </div>
     </div>
   );
 }
