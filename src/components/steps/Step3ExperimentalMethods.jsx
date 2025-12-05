@@ -19,9 +19,9 @@ export default function Step3ExperimentalMethods() {
   const [suggestions, setSuggestions] = useState([]); //Per a la llista d'autocompletat
 
   const [error, setError] = useState(""); //Missatges d'error (duplicats, etc.)
-  const [showCreateForm, setShowCreateForm] = useState(false); //NOU: per obrir el formulari manual
+  const [showCreateForm, setShowCreateForm] = useState(false); //per obrir el formulari manual
 
-  //Nuevo: ECO para nueva técnica (input independiente)
+  //ECO para nueva técnica (input nuevo)
   const [newEcoCode, setNewEcoCode] = useState("");
 
   function esc(str) {
@@ -95,7 +95,7 @@ export default function Step3ExperimentalMethods() {
     setError("");
   }
 
-  //NOU BOTÓ → Obrir formulari manual
+  //Obrir formulari manual
   function handleAddTechnique() {
     setError("");
     setShowCreateForm(true);
@@ -124,7 +124,7 @@ export default function Step3ExperimentalMethods() {
       return;
     }
 
-    //PREP per deploy al Step7
+    //preparació per deploy al Step7
     const sql = `
       INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
       VALUES (NULL, '${esc(techDescription)}', NULL, '${esc(raw)}');
@@ -136,10 +136,10 @@ export default function Step3ExperimentalMethods() {
       );
     `;
 
-    //Afegim a la llista
+    //Afegim  tècnica a la llista
     setTechniques([...techniques, raw]);
 
-    //reset form
+    //reset formulari
     setShowCreateForm(false);
     setNewEcoCode("");
     setTechDescription("");
