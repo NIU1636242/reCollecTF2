@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { runQuery } from "../../db/queryExecutor";
 import { useCuration } from "../../context/CurationContext";
+import { parseGenbank } from "genbank-parser";
 
 // ------------------------------------------------------------
 // REVERSE COMPLEMENT
@@ -15,9 +15,32 @@ function revComp(seq) {
 }
 
 // ------------------------------------------------------------
-// SEARCH EXACT MATCHES
+// FIND CLOSEST GENE (±150bp)
 // ------------------------------------------------------------
-function findMatches(genomeSeq, reportedSeq) {
+function nearestGene(genes, start, end) {
+  if (!genes?.length) return null;
+
+  const center = (start + end) / 2;
+  let best = null;
+  let bestDist = Infinity;
+
+  for (const g of genes) {
+    const gc = (g.start + g.end) / 2;
+    const dist = Math.abs(gc - center);
+    if (dist < bestDist) {
+      best = g;
+      bestDist = dist;
+    }
+  }
+
+  if (bestDist > 150) return null;
+  return best;
+}
+
+// ------------------------------------------------------------
+// EXACT MATCH SEARCH (ONE GENOME)
+// ------------------------------------------------------------
+function findMatches(genomeSeq, genes, reportedSeq, accession) {
   const seq = reportedSeq.toUpperCase();
   const rev = revComp(seq);
   const len = seq.length;
@@ -27,26 +50,40 @@ function findMatches(genomeSeq, reportedSeq) {
   // forward strand
   let i = genomeSeq.indexOf(seq);
   while (i !== -1) {
+    const g = nearestGene(genes, i, i + len - 1);
+
     results.push({
+      accession,
       seq,
       reportedSeq,
       start: i,
       end: i + len - 1,
       strand: "+",
+      locus: g?.locus,
+      gene: g?.gene,
+      product: g?.product
     });
+
     i = genomeSeq.indexOf(seq, i + 1);
   }
 
   // reverse strand
   let j = genomeSeq.indexOf(rev);
   while (j !== -1) {
+    const g = nearestGene(genes, j, j + len - 1);
+
     results.push({
+      accession,
       seq: rev,
       reportedSeq,
       start: j,
       end: j + len - 1,
       strand: "-",
+      locus: g?.locus,
+      gene: g?.gene,
+      product: g?.product
     });
+
     j = genomeSeq.indexOf(rev, j + 1);
   }
 
@@ -69,50 +106,57 @@ export default function Step4ReportedSites() {
   const [sites, setSites] = useState([]);
   const [matches, setMatches] = useState([]);
 
-  const [loadedGenomes, setLoadedGenomes] = useState({});
+  const [loadedGenomes, setLoadedGenomes] = useState({}); // { acc: {seq, genes} }
 
   // ------------------------------------------------------------
-  // LOAD FASTA for selected genomes
+  // LOAD GENBANK for selected genomes
   // ------------------------------------------------------------
-  async function fetchGenome(accession) {
-    const url = `https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/accession/${accession}/download?include=sequence&filename=seq.fasta`;
+  async function fetchGenomeGenbank(accession) {
+    const url = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?
+      db=nuccore&id=${accession}&rettype=gb&retmode=text`;
 
     try {
-      const r = await fetch(url);
-      const blob = await r.blob();
-      const text = await blob.text();
+      const text = await fetch(url).then((r) => r.text());
+      const gb = parseGenbank(text);
 
-      // parse FASTA
-      const seq = text
-        .split("\n")
-        .filter((l) => !l.startsWith(">"))
-        .join("")
-        .toUpperCase();
+      const seq = gb.sequence.toUpperCase();
 
-      return seq;
+      // extract gene features
+      const genes = gb.features
+        .filter((f) => f.type === "gene" && f.location)
+        .map((f) => ({
+          start: f.location[0],
+          end: f.location[1],
+          strand: f.strand,
+          locus: f.qualifiers?.locus_tag || "",
+          gene: f.qualifiers?.gene || "",
+          product: f.qualifiers?.product || "",
+        }));
+
+      return { seq, genes };
     } catch (err) {
-      console.error("Error fetching genome FASTA", accession, err);
+      console.error("Error fetching genome", accession, err);
       return null;
     }
   }
 
   useEffect(() => {
-    async function loadGenomes() {
+    async function load() {
       if (!genomeList?.length) return;
 
       const store = {};
 
       for (const g of genomeList) {
         const acc = g.accession;
-        const seq = await fetchGenome(acc);
-        if (seq) store[acc] = seq;
+        const data = await fetchGenomeGenbank(acc);
+        if (data) store[acc] = data;
       }
 
       setLoadedGenomes(store);
       console.log("Loaded genomes:", store);
     }
 
-    loadGenomes();
+    load();
   }, [genomeList]);
 
   // ------------------------------------------------------------
@@ -126,12 +170,11 @@ export default function Step4ReportedSites() {
 
     setSites(seqs);
 
-    // search automatically
     runExactMatchSearch(seqs);
 
     // open accordion 2 automatically
     setAccordionOpen({
-      step1: true, // or false if you want collapse
+      step1: true,
       step2: true,
       step3: false,
       step4: false,
@@ -147,22 +190,16 @@ export default function Step4ReportedSites() {
       return;
     }
 
-    const allMatches = [];
+    const all = [];
 
     for (const seq of seqs) {
-      for (const [acc, genomeSeq] of Object.entries(loadedGenomes)) {
-        const hits = findMatches(genomeSeq, seq);
-
-        hits.forEach((hit) => {
-          allMatches.push({
-            accession: acc,
-            ...hit,
-          });
-        });
+      for (const [acc, data] of Object.entries(loadedGenomes)) {
+        const hits = findMatches(data.seq, data.genes, seq, acc);
+        all.push(...hits);
       }
     }
 
-    setMatches(allMatches);
+    setMatches(all);
   }
 
   // ------------------------------------------------------------
@@ -176,7 +213,7 @@ export default function Step4ReportedSites() {
   }
 
   // ------------------------------------------------------------
-  // RENDER
+  // UI
   // ------------------------------------------------------------
   return (
     <div className="space-y-8">
@@ -196,11 +233,13 @@ export default function Step4ReportedSites() {
 
         {accordionOpen.step1 && (
           <div className="space-y-4">
+
             {/* SITE TYPE */}
             <div>
               <label className="block font-medium mb-1">Site type</label>
 
               <div className="space-y-1 text-sm">
+
                 <label className="flex gap-2 items-center">
                   <input
                     type="radio"
@@ -237,7 +276,7 @@ export default function Step4ReportedSites() {
                 className="form-control w-full h-40"
                 value={rawInput}
                 onChange={(e) => setRawInput(e.target.value)}
-                placeholder="AAGATTACATT\nAAGATAACATT"
+                placeholder="AAGATTACATT ..."
               />
             </div>
 
@@ -250,7 +289,7 @@ export default function Step4ReportedSites() {
 
       {/* ---------------------------------------------------------
           ACCORDION 2
-      ---------------------------------------------------------- */}
+      --------------------------------------------------------- */}
       <div className="bg-surface border border-border rounded p-4">
         <button
           className="flex justify-between w-full text-lg font-semibold mb-3"
@@ -262,6 +301,7 @@ export default function Step4ReportedSites() {
 
         {accordionOpen.step2 && (
           <div className="space-y-2 text-sm">
+
             {matches.length === 0 && (
               <p className="text-muted">No matches found.</p>
             )}
@@ -271,10 +311,19 @@ export default function Step4ReportedSites() {
                 key={i}
                 className="p-2 border border-border rounded bg-muted"
               >
-                <p className="font-medium">{m.reportedSeq}</p>
-                <p>
+                <div className="font-mono text-accent">
+                  {m.reportedSeq}
+                </div>
+
+                <div>
                   {m.accession}: [{m.start} – {m.end}] ({m.strand})
-                </p>
+                </div>
+
+                {m.locus && (
+                  <div className="mt-1">
+                    <strong>{m.locus}</strong> | {m.gene} | {m.product}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -282,8 +331,8 @@ export default function Step4ReportedSites() {
       </div>
 
       {/* ---------------------------------------------------------
-          ACCORDION 3 (PLACEHOLDER)
-      ---------------------------------------------------------- */}
+          ACCORDION 3 placeholder
+      --------------------------------------------------------- */}
       <div className="bg-surface border border-border rounded p-4 opacity-40">
         <button
           className="flex justify-between w-full text-lg font-semibold mb-3"
@@ -299,8 +348,8 @@ export default function Step4ReportedSites() {
       </div>
 
       {/* ---------------------------------------------------------
-          ACCORDION 4 (PLACEHOLDER)
-      ---------------------------------------------------------- */}
+          ACCORDION 4 placeholder
+      --------------------------------------------------------- */}
       <div className="bg-surface border border-border rounded p-4 opacity-40">
         <button
           className="flex justify-between w-full text-lg font-semibold mb-3"
