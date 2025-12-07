@@ -149,58 +149,49 @@ function parseGFF(text) {
 // ------------------------------------------------------------
 // Descarga ZIP de NCBI Datasets, extrae FASTA y GFF
 // ------------------------------------------------------------
-async function fetchGenomeFromDatasets(accession) {
-  const url = `${DATASETS_BASE}/${accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF`;
-
+async function fetchGenome(accession) {
   try {
-    const res = await fetch(PROXY + encodeURIComponent(url));
-    if (!res.ok) {
-      console.error("Error HTTP descargando genome", accession, res.status);
-      return null;
-    }
+    // 1. FASTA
+    const fastaRes = await fetch(
+      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${accession}&rettype=fasta&retmode=text`
+    );
 
-    const arrayBuffer = await res.arrayBuffer();
-    const zip = await JSZip.loadAsync(arrayBuffer);
+    const fastaText = await fastaRes.text();
+    const seq = fastaText
+      .split("\n")
+      .filter((l) => !l.startsWith(">"))
+      .join("")
+      .toUpperCase();
 
-    let fastaFile = null;
-    let gffFile = null;
+    // 2. GFF/annotation JSON
+    const annRes = await fetch(
+      `https://api.ncbi.nlm.nih.gov/datasets/v1/genome/accession/${accession}/gff`
+    );
+    const json = await annRes.json();
 
-    zip.forEach((relPath, file) => {
-      if (file.dir) return;
-      const lower = relPath.toLowerCase();
-      if (
-        !fastaFile &&
-        (lower.endsWith(".fna") ||
-          lower.endsWith(".fa") ||
-          lower.endsWith(".fasta"))
-      ) {
-        fastaFile = file;
-      }
-      if (!gffFile && (lower.endsWith(".gff") || lower.endsWith(".gff3"))) {
-        gffFile = file;
-      }
+    const genes = [];
+
+    json?.annotations?.forEach((ann) => {
+      ann?.genes?.forEach((g) => {
+        genes.push({
+          start: g.start - 1,
+          end: g.end - 1,
+          strand: g.strand === "-" ? -1 : 1,
+          locus_tag: g.locus_tag || "",
+          name: g.gene_name || "",
+          product: g.product_name || "",
+        });
+      });
     });
 
-    if (!fastaFile) {
-      console.warn("No FASTA found in ZIP for", accession);
-      return null;
-    }
-
-    const fastaText = await fastaFile.async("text");
-    const seq = parseFastaSequence(fastaText);
-
-    let genes = [];
-    if (gffFile) {
-      const gffText = await gffFile.async("text");
-      genes = parseGFF(gffText);
-    }
-
     return { seq, genes };
+
   } catch (err) {
-    console.error("Error fetching genome package", accession, err);
+    console.error("Error loading genome", accession, err);
     return null;
   }
 }
+
 
 // ------------------------------------------------------------
 // COMPONENTE PRINCIPAL
@@ -226,24 +217,25 @@ export default function Step4ReportedSites() {
   // ------------------------------------------------------------
   // Cargar genomas (FASTA + GFF) cuando haya genomeList
   // ------------------------------------------------------------
-  useEffect(() => {
-    async function loadGenomes() {
-      if (!genomeList || genomeList.length === 0) return;
+useEffect(() => {
+  async function loadGenomes() {
+    if (!genomeList?.length) return;
 
-      const result = {};
-      for (const g of genomeList) {
-        const acc = g.accession;
-        const data = await fetchGenomeFromDatasets(acc);
-        if (data && data.seq) {
-          result[acc] = data;
-        }
-      }
-      setLoadedGenomes(result);
-      console.log("Loaded genomes:", result);
+    const result = {};
+
+    for (const g of genomeList) {
+      const acc = g.accession;
+      const data = await fetchGenome(acc);
+      if (data && data.seq) result[acc] = data;
     }
 
-    loadGenomes();
-  }, [genomeList]);
+    setLoadedGenomes(result);
+    console.log("Loaded genomes:", result);
+  }
+
+  loadGenomes();
+}, [genomeList]);
+
 
   // ------------------------------------------------------------
   // Al pulsar Save en el acordeón 1
