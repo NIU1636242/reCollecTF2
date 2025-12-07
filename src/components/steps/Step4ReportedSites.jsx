@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useCuration } from "../../context/CurationContext";
 
 // =======================================================
-// UTILS
+// Sequence utilities
 // =======================================================
 
 function revComp(seq) {
@@ -10,7 +10,7 @@ function revComp(seq) {
   return seq
     .split("")
     .reverse()
-    .map((b) => map[b] || "N")
+    .map((c) => map[c] || "N")
     .join("");
 }
 
@@ -23,17 +23,18 @@ function mismatches(a, b) {
 function buildBars(a, b) {
   return a
     .split("")
-    .map((c, i) => (a[i] === b[i] ? "|" : " "))
+    .map((c, i) => (c === b[i] ? "|" : " "))
     .join("");
 }
 
 // =======================================================
-// COMPONENTE
+// MAIN COMPONENT
 // =======================================================
 
 export default function Step4ReportedSites() {
   const { genomeList, techniques } = useCuration();
 
+  // Accordion states
   const [accordion, setAccordion] = useState({
     a1: true,
     a2: true,
@@ -41,23 +42,38 @@ export default function Step4ReportedSites() {
     a4: true,
   });
 
+  // User input
   const [siteType, setSiteType] = useState("variable");
   const [rawSites, setRawSites] = useState("");
 
+  // Processed sites
   const [sites, setSites] = useState([]);
 
+  // Loaded genomes
   const [genomes, setGenomes] = useState([]);
+
+  // Matches
   const [exactHits, setExactHits] = useState({});
   const [fuzzyHits, setFuzzyHits] = useState({});
 
+  // User choice per site
   const [choice, setChoice] = useState({});
+
+  // Show fuzzy accordion?
   const [showFuzzy, setShowFuzzy] = useState(false);
 
-  // Acordeón 4 data
+  // Acordeon 4 annotation data
   const [annotations, setAnnotations] = useState({});
 
+  // Bulk apply selects (acordeón 4)
+  const TF_TYPES = ["monomer", "dimer", "tetramer", "other", "not specified"];
+  const TF_FUNCS = ["activator", "repressor", "dual", "not specified"];
+
+  const [bulkTfType, setBulkTfType] = useState("monomer");
+  const [bulkTfFunc, setBulkTfFunc] = useState("activator");
+
   // =======================================================
-  // CARGAR GENOMAS COMO ANTES (SOLO SECUENCIA)
+  // LOAD GENOMES (FASTA ONLY — LIKE BEFORE)
   // =======================================================
 
   useEffect(() => {
@@ -68,9 +84,7 @@ export default function Step4ReportedSites() {
 
       for (const g of genomeList) {
         try {
-          // IMPORTANTE: usar tu proxy y endpoint original
           const url = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=fasta&retmode=text`;
-
           const res = await fetch(url);
           const txt = await res.text();
 
@@ -94,11 +108,11 @@ export default function Step4ReportedSites() {
     load();
   }, [genomeList]);
 
-  // =======================================================
-  // BUSCAR EXACT MATCHES (VERSIÓN ORIGINAL)
+    // =======================================================
+  // SEARCH EXACT MATCHES
   // =======================================================
 
-  function searchExact() {
+  function findExact() {
     const arr = rawSites
       .split(/\r?\n/g)
       .map((s) => s.trim().toUpperCase())
@@ -110,22 +124,23 @@ export default function Step4ReportedSites() {
 
     arr.forEach((site) => {
       const rc = revComp(site);
+      const L = site.length;
       all[site] = [];
 
       genomes.forEach((g) => {
         const seq = g.sequence;
-        const L = site.length;
 
         // +
         let i = seq.indexOf(site);
         while (i !== -1) {
           all[site].push({
-            seq: site,
+            type: "exact",
+            site,
             match: site,
             start: i,
             end: i + L - 1,
-            strand: "+",
             acc: g.acc,
+            strand: "+",
           });
           i = seq.indexOf(site, i + 1);
         }
@@ -134,23 +149,26 @@ export default function Step4ReportedSites() {
         let j = seq.indexOf(rc);
         while (j !== -1) {
           all[site].push({
-            seq: site,
+            type: "exact",
+            site,
             match: rc,
             start: j,
             end: j + L - 1,
-            strand: "-",
             acc: g.acc,
+            strand: "-",
           });
           j = seq.indexOf(rc, j + 1);
         }
       });
 
-      if (all[site].length === 0) all[site].push("none");
+      if (all[site].length === 0) {
+        all[site] = ["none"];
+      }
     });
 
     setExactHits(all);
 
-    // inicializar choice
+    // reset choices
     const ch = {};
     arr.forEach((s) => (ch[s] = null));
     setChoice(ch);
@@ -161,44 +179,44 @@ export default function Step4ReportedSites() {
   }
 
   // =======================================================
-  // BUSCAR MISMATCHES (VERSIÓN ORIGINAL)
+  // SEARCH FUZZY (1–2 mismatches)
   // =======================================================
 
-  function searchFuzzy(site) {
+  function findFuzzy(site) {
     const L = site.length;
     const rc = revComp(site);
-
     const found = [];
 
     genomes.forEach((g) => {
       const seq = g.sequence;
-
       for (let i = 0; i <= seq.length - L; i++) {
         const sub = seq.slice(i, i + L);
 
         const mmF = mismatches(sub, site);
         if (mmF > 0 && mmF <= 2) {
           found.push({
+            type: "fuzzy",
             site,
             match: sub,
             bars: buildBars(site, sub),
             start: i,
             end: i + L - 1,
-            strand: "+",
             acc: g.acc,
+            strand: "+",
           });
         }
 
         const mmR = mismatches(sub, rc);
         if (mmR > 0 && mmR <= 2) {
           found.push({
+            type: "fuzzy",
             site,
             match: sub,
             bars: buildBars(rc, sub),
             start: i,
             end: i + L - 1,
-            strand: "-",
             acc: g.acc,
+            strand: "-",
           });
         }
       }
@@ -214,38 +232,43 @@ export default function Step4ReportedSites() {
   // UI
   // =======================================================
 
+  function toggleAcc(k) {
+    setAccordion((p) => ({ ...p, [k]: !p[k] }));
+  }
+
   return (
     <div className="space-y-8">
 
       {/* =======================================================
-          1: REPORTED SITES
+          ACCORDION 1 — INPUT
       ======================================================= */}
       <div className="bg-surface border border-border rounded p-4">
         <button className="flex justify-between w-full font-semibold mb-3"
-          onClick={() => setAccordion(p => ({ ...p, a1: !p.a1 }))}>
+          onClick={() => toggleAcc("a1")}>
           <span>Reported sites</span>
           <span>{accordion.a1 ? "▲" : "▼"}</span>
         </button>
 
         {accordion.a1 && (
           <div className="space-y-3 text-sm">
-            <div>
-              <label className="flex items-center gap-2">
+            {/* site type */}
+            <div className="space-y-1">
+              <label className="flex gap-2">
                 <input type="radio" checked={siteType === "motif"}
                   onChange={() => setSiteType("motif")} />
-                <span>motif-associated (new motif)</span>
+                motif-associated (new motif)
               </label>
 
-              <label className="flex items-center gap-2">
+              <label className="flex gap-2">
                 <input type="radio" checked={siteType === "variable"}
                   onChange={() => setSiteType("variable")} />
-                <span>variable motif associated</span>
+                variable motif associated
               </label>
 
-              <label className="flex items-center gap-2">
+              <label className="flex gap-2">
                 <input type="radio" checked={siteType === "nonmotif"}
                   onChange={() => setSiteType("nonmotif")} />
-                <span>non-motif associated</span>
+                non-motif associated
               </label>
             </div>
 
@@ -255,17 +278,20 @@ export default function Step4ReportedSites() {
               onChange={(e) => setRawSites(e.target.value)}
             />
 
-            <button className="btn" onClick={searchExact}>Save</button>
+            <button className="btn" onClick={findExact}>
+              Save
+            </button>
           </div>
         )}
       </div>
 
       {/* =======================================================
-          2: EXACT MATCHES
+          ACCORDION 2 — EXACT MATCHES
       ======================================================= */}
+
       <div className="bg-surface border border-border rounded p-4">
         <button className="flex justify-between w-full font-semibold mb-3"
-          onClick={() => setAccordion(p => ({ ...p, a2: !p.a2 }))}>
+          onClick={() => toggleAcc("a2")}>
           <span>Exact site matches</span>
           <span>{accordion.a2 ? "▲" : "▼"}</span>
         </button>
@@ -279,34 +305,35 @@ export default function Step4ReportedSites() {
                 <div key={site} className="border border-border rounded p-3 space-y-2">
                   <div className="font-semibold text-accent">{site}</div>
 
-                  {arr.map((hit, i) => (
+                  {arr.map((hit, i) =>
                     hit !== "none" ? (
-                      <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <label key={i} className="flex gap-2 text-xs cursor-pointer">
                         <input
                           type="radio"
                           name={`ex-${site}`}
                           checked={choice[site] === `ex-${i}`}
                           onChange={() => {
-                            setChoice(p => ({ ...p, [site]: `ex-${i}` }));
-                            setAccordion(p => ({ ...p, a4: true }));
+                            setChoice((p) => ({ ...p, [site]: `ex-${i}` }));
+                            setAccordion((p) => ({ ...p, a4: true }));
                           }}
                         />
                         <span className="font-mono">
-                          {hit.seq} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                          {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
                         </span>
                       </label>
                     ) : null
-                  ))}
+                  )}
 
-                  <label className="flex items-center gap-2 text-xs cursor-pointer mt-2">
+                  {/* no match */}
+                  <label className="flex gap-2 text-xs cursor-pointer mt-2">
                     <input
                       type="radio"
                       name={`ex-${site}`}
                       checked={choice[site] === "none"}
                       onChange={() => {
-                        setChoice(p => ({ ...p, [site]: "none" }));
-                        searchFuzzy(site);
-                        setAccordion(p => ({ ...p, a3: true }));
+                        setChoice((p) => ({ ...p, [site]: "none" }));
+                        findFuzzy(site);
+                        setAccordion((p) => ({ ...p, a3: true }));
                       }}
                     />
                     <span>No valid match.</span>
@@ -319,12 +346,13 @@ export default function Step4ReportedSites() {
       </div>
 
       {/* =======================================================
-          3: INEXACT MATCHES (MISMATCHES)
+          ACCORDION 3 — MISMATCHES
       ======================================================= */}
+
       {showFuzzy && (
         <div className="bg-surface border border-border rounded p-4">
           <button className="flex justify-between w-full font-semibold mb-3"
-            onClick={() => setAccordion(p => ({ ...p, a3: !p.a3 }))}>
+            onClick={() => toggleAcc("a3")}>
             <span>Inexact matches (mismatches)</span>
             <span>{accordion.a3 ? "▲" : "▼"}</span>
           </button>
@@ -342,19 +370,18 @@ export default function Step4ReportedSites() {
 
                     {arr.map((hit, i) =>
                       hit !== "none" ? (
-                        <label key={i}
-                          className="flex items-start gap-2 text-xs cursor-pointer">
+                        <label key={i} className="flex gap-2 text-xs cursor-pointer">
                           <input
                             type="radio"
                             name={`fz-${site}`}
                             checked={choice[site] === `fz-${i}`}
                             onChange={() => {
-                              setChoice(p => ({ ...p, [site]: `fz-${i}` }));
-                              setAccordion(p => ({ ...p, a4: true }));
+                              setChoice((p) => ({ ...p, [site]: `fz-${i}` }));
+                              setAccordion((p) => ({ ...p, a4: true }));
                             }}
                           />
-                          <span className="font-mono whitespace-pre">
-                            {hit.seq}
+                          <span className="font-mono whitespace-pre leading-4">
+                            {hit.site}
                             {"\n"}
                             {hit.bars}
                             {"\n"}
@@ -364,14 +391,15 @@ export default function Step4ReportedSites() {
                       ) : null
                     )}
 
-                    <label className="flex items-center gap-2 text-xs cursor-pointer mt-2">
+                    {/* no match */}
+                    <label className="flex gap-2 text-xs cursor-pointer mt-2">
                       <input
                         type="radio"
                         name={`fz-${site}`}
                         checked={choice[site] === "fz-none"}
                         onChange={() => {
-                          setChoice(p => ({ ...p, [site]: "fz-none" }));
-                          setAccordion(p => ({ ...p, a4: true }));
+                          setChoice((p) => ({ ...p, [site]: "fz-none" }));
+                          setAccordion((p) => ({ ...p, a4: true }));
                         }}
                       />
                       <span>No valid match.</span>
@@ -383,21 +411,21 @@ export default function Step4ReportedSites() {
           )}
         </div>
       )}
-
       {/* =======================================================
-          4: SITE ANNOTATION (el tuyo actual)
+          ACCORDION 4 — SITE ANNOTATION
       ======================================================= */}
-           <div className="bg-surface border border-border rounded p-4">
-        <button
-          className="flex justify-between w-full text-lg font-semibold mb-3"
-          onClick={() => toggleAccordion("step4")}
-        >
+
+      <div className="bg-surface border border-border rounded p-4">
+        <button className="flex justify-between w-full font-semibold mb-3"
+          onClick={() => toggleAcc("a4")}>
           <span>Site annotation</span>
-          <span>{accordionOpen.step4 ? "▲" : "▼"}</span>
+          <span>{accordion.a4 ? "▲" : "▼"}</span>
         </button>
 
-        {accordionOpen.step4 && (
+        {accordion.a4 && (
           <div className="text-sm">
+
+            {/* HEADER */}
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-border">
@@ -409,19 +437,30 @@ export default function Step4ReportedSites() {
               </thead>
 
               <tbody>
-                {/* fila de controles globales */}
+                {/* BULK ROW */}
                 <tr className="border-b border-border bg-muted/40">
                   <td className="px-2 py-1">
                     <button
-                      type="button"
                       className="text-blue-400 hover:text-blue-300 underline"
-                      onClick={selectUnselectAll}
+                      onClick={() => {
+                        const any = sites.some((s) => annotations[s]?.selected);
+                        const a = {};
+                        sites.forEach((s) => {
+                          a[s] = {
+                            ...(annotations[s] || {
+                              tfType: "monomer",
+                              tfFunc: "activator",
+                              useTechniques: false,
+                            }),
+                            selected: !any,
+                          };
+                        });
+                        setAnnotations(a);
+                      }}
                     >
                       Select/Unselect all
                     </button>
                   </td>
-
-                  {/* TF-type global */}
                   <td className="px-2 py-1">
                     <div className="flex flex-col gap-1">
                       <select
@@ -430,22 +469,29 @@ export default function Step4ReportedSites() {
                         onChange={(e) => setBulkTfType(e.target.value)}
                       >
                         {TF_TYPES.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
+                          <option key={t}>{t}</option>
                         ))}
                       </select>
+
                       <button
-                        type="button"
                         className="text-blue-400 hover:text-blue-300 underline text-[11px]"
-                        onClick={applyTfTypeToSelected}
+                        onClick={() => {
+                          const a = {};
+                          sites.forEach((s) => {
+                            const p = annotations[s] || {};
+                            a[s] = {
+                              ...p,
+                              tfType: p.selected ? bulkTfType : p.tfType,
+                            };
+                          });
+                          setAnnotations(a);
+                        }}
                       >
                         Apply to selected
                       </button>
                     </div>
                   </td>
 
-                  {/* TF-function global */}
                   <td className="px-2 py-1">
                     <div className="flex flex-col gap-1">
                       <select
@@ -454,40 +500,66 @@ export default function Step4ReportedSites() {
                         onChange={(e) => setBulkTfFunc(e.target.value)}
                       >
                         {TF_FUNCS.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
+                          <option key={t}>{t}</option>
                         ))}
                       </select>
+
                       <button
-                        type="button"
                         className="text-blue-400 hover:text-blue-300 underline text-[11px]"
-                        onClick={applyTfFuncToSelected}
+                        onClick={() => {
+                          const a = {};
+                          sites.forEach((s) => {
+                            const p = annotations[s] || {};
+                            a[s] = {
+                              ...p,
+                              tfFunc: p.selected ? bulkTfFunc : p.tfFunc,
+                            };
+                          });
+                          setAnnotations(a);
+                        }}
                       >
                         Apply to selected
                       </button>
                     </div>
                   </td>
 
-                  {/* Técnicas global */}
                   <td className="px-2 py-1">
                     <div className="flex flex-col gap-1">
                       <span className="text-xs">
-                        {techniquesText || "—"}
+                        {techniques?.map((t) =>
+                          typeof t === "string" ? t : t.name
+                        ).join(", ") || "—"}
                       </span>
-                      {techniques && techniques.length > 0 && (
+
+                      {techniques?.length > 0 && (
                         <div className="flex gap-2 text-[11px]">
                           <button
-                            type="button"
                             className="text-blue-400 hover:text-blue-300 underline"
-                            onClick={applyTechniquesToSelected}
+                            onClick={() => {
+                              const a = {};
+                              sites.forEach((s) => {
+                                const p = annotations[s] || {};
+                                a[s] = {
+                                  ...p,
+                                  useTechniques: p.selected || p.useTechniques,
+                                };
+                              });
+                              setAnnotations(a);
+                            }}
                           >
                             Apply to selected
                           </button>
+
                           <button
-                            type="button"
                             className="text-blue-400 hover:text-blue-300 underline"
-                            onClick={clearTechniques}
+                            onClick={() => {
+                              const a = {};
+                              sites.forEach((s) => {
+                                const p = annotations[s] || {};
+                                a[s] = { ...p, useTechniques: false };
+                              });
+                              setAnnotations(a);
+                            }}
                           >
                             Clear all
                           </button>
@@ -497,98 +569,109 @@ export default function Step4ReportedSites() {
                   </td>
                 </tr>
 
-                {/* filas por sitio */}
+                {/* PER-SITE ROWS */}
                 {sites.map((site) => {
-                  const sel = finalChoice[site];
-                  const annot = siteAnnotations[site] || {
+                  const ann = annotations[site] || {
                     selected: false,
                     tfType: "monomer",
                     tfFunc: "activator",
                     useTechniques: false,
                   };
 
-                  // texto del sitio (según se haya escogido exact, fuzzy o none)
-                  let siteText = site;
-                  if (sel && sel.type === "exact") {
-                    const m = sel.data;
-                    siteText = `${m.siteSeq} ${m.strand}[${m.start + 1},${
-                      m.end + 1
-                    }]  ${m.genomeAcc}`;
-                  } else if (sel && sel.type === "fuzzy") {
-                    const m = sel.data;
-                    siteText = `${m.siteSeq}\n${m.bars}\n${m.genomeSeq} ${
-                      m.strand
-                    }[${m.start + 1},${m.end + 1}]  ${m.genomeAcc}`;
+                  const sel = choice[site];
+
+                  let text = site;
+                  const ex = exactHits[site];
+                  const fz = fuzzyHits[site];
+
+                  if (sel && sel.startsWith("ex-")) {
+                    const idx = parseInt(sel.split("-")[1]);
+                    const h = ex[idx];
+                    text = `${h.site} ${h.strand}[${h.start + 1},${h.end + 1}] ${h.acc}`;
+                  }
+
+                  if (sel && sel.startsWith("fz-")) {
+                    const idx = parseInt(sel.split("-")[1]);
+                    const h = fz[idx];
+                    text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${h.start + 1},${h.end + 1}] ${h.acc}`;
                   }
 
                   return (
                     <tr key={site} className="border-b border-border">
-                      {/* SITE + checkbox */}
                       <td className="px-2 py-2 align-top">
-                        <label className="flex items-start gap-2 cursor-pointer">
+                        <label className="flex gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            className="mt-[2px]"
-                            checked={annot.selected}
-                            onChange={() => toggleSiteSelected(site)}
+                            checked={ann.selected}
+                            onChange={() =>
+                              setAnnotations((p) => ({
+                                ...p,
+                                [site]: { ...ann, selected: !ann.selected },
+                              }))
+                            }
                           />
                           <span className="font-mono text-[11px] whitespace-pre-wrap">
-                            {siteText}
+                            {text}
                           </span>
                         </label>
                       </td>
 
-                      {/* TF-type por sitio */}
                       <td className="px-2 py-2 align-top">
                         <select
                           className="form-control h-7 text-xs"
-                          value={annot.tfType}
+                          value={ann.tfType}
                           onChange={(e) =>
-                            updateSiteTfType(site, e.target.value)
+                            setAnnotations((p) => ({
+                              ...p,
+                              [site]: { ...ann, tfType: e.target.value },
+                            }))
                           }
                         >
                           {TF_TYPES.map((t) => (
-                            <option key={t} value={t}>
-                              {t}
-                            </option>
+                            <option key={t}>{t}</option>
                           ))}
                         </select>
                       </td>
 
-                      {/* TF-function por sitio */}
                       <td className="px-2 py-2 align-top">
                         <select
                           className="form-control h-7 text-xs"
-                          value={annot.tfFunc}
+                          value={ann.tfFunc}
                           onChange={(e) =>
-                            updateSiteTfFunc(site, e.target.value)
+                            setAnnotations((p) => ({
+                              ...p,
+                              [site]: { ...ann, tfFunc: e.target.value },
+                            }))
                           }
                         >
                           {TF_FUNCS.map((t) => (
-                            <option key={t} value={t}>
-                              {t}
-                            </option>
+                            <option key={t}>{t}</option>
                           ))}
                         </select>
                       </td>
 
-                      {/* Experimental techniques: checkbox general para todas las técnicas */}
                       <td className="px-2 py-2 align-top">
-                        {techniques && techniques.length > 0 ? (
-                          <label className="inline-flex items-center gap-2">
+                        {techniques?.length > 0 ? (
+                          <label className="inline-flex gap-2 text-xs cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={annot.useTechniques}
+                              checked={ann.useTechniques}
                               onChange={(e) =>
-                                updateSiteUseTech(site, e.target.checked)
+                                setAnnotations((p) => ({
+                                  ...p,
+                                  [site]: {
+                                    ...ann,
+                                    useTechniques: e.target.checked,
+                                  },
+                                }))
                               }
                             />
-                            <span className="text-[11px]">
-                              {techniquesText}
-                            </span>
+                            {techniques
+                              .map((t) => (typeof t === "string" ? t : t.name))
+                              .join(", ")}
                           </label>
                         ) : (
-                          <span className="text-xs text-muted">—</span>
+                          <span className="text-muted">—</span>
                         )}
                       </td>
                     </tr>
@@ -596,6 +679,7 @@ export default function Step4ReportedSites() {
                 })}
               </tbody>
             </table>
+
           </div>
         )}
       </div>
