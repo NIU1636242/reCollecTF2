@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { useCuration } from "../../context/CurationContext";
 import parseGenbank from "genbank-parser";
+import { useCuration } from "../../context/CurationContext";
 
-// ============================================================
+// ------------------------------------------------------------
 // REVERSE COMPLEMENT
-// ============================================================
+// ------------------------------------------------------------
 function revComp(seq) {
   const map = { A: "T", T: "A", C: "G", G: "C" };
   return seq
@@ -14,63 +14,76 @@ function revComp(seq) {
     .join("");
 }
 
-// ============================================================
-// FETCH GENBANK + PARSE
-// ============================================================
-async function fetchGenbank(accession) {
-  const url = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${accession}&rettype=gb&retmode=text`;
+// ------------------------------------------------------------
+// EXTRACT SEQUENCE FROM GENBANK (ORIGIN)
+// ------------------------------------------------------------
+function extractSequence(text) {
+  const m = text.match(/ORIGIN([\s\S]*?)\/\//i);
+  if (!m) return "";
+
+  return m[1]
+    .replace(/[0-9\s\/]/g, "")
+    .toUpperCase();
+}
+
+// ------------------------------------------------------------
+// FETCH GENBANK & PARSE FEATURES + SEQUENCE
+// ------------------------------------------------------------
+async function fetchGenome(acc) {
+  const url =
+    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=${acc}&rettype=gb&retmode=text`;
 
   try {
     const r = await fetch(url);
     const text = await r.text();
 
-    const gb = parseGenbank(text);
+    if (!text) throw new Error("Empty text");
 
-    const seq = gb.sequence?.toUpperCase() || "";
+    // parse features
+    const parsed = parseGenbank(text);
 
-    const genes = [];
+    const record = parsed[0];
+    if (!record) throw new Error("No record parsed");
 
-    for (const f of gb.features || []) {
-      if (!["gene", "CDS"].includes(f.type)) continue;
-      if (!f.location) continue;
+    // extract sequence
+    const seq = extractSequence(text);
 
-      const start = Number(f.location?.start);
-      const end = Number(f.location?.end);
-      const strand = f.location?.strand === "-" ? -1 : 1;
-
-      let locus_tag = null;
-      let gene = null;
-      let product = null;
-
-      for (const q of f.qualifiers || []) {
-        if (q.key === "locus_tag") locus_tag = q.value;
-        if (q.key === "gene") gene = q.value;
-        if (q.key === "product") product = q.value;
-      }
-
-      genes.push({ start, end, strand, locus_tag, gene, product });
-    }
+    // extract genes
+    const genes = record.features
+      .filter((f) => f.type === "gene")
+      .map((f) => ({
+        start: f.start ?? 0,
+        end: f.end ?? 0,
+        strand: f.strand ?? 1,
+        locus_tag: f.notes?.locus_tag?.[0] ?? "",
+        name: f.notes?.gene?.[0] ?? "",
+        function: f.notes?.product?.[0] ?? "",
+      }));
 
     return { seq, genes };
+
   } catch (err) {
-    console.error("Error fetching GenBank", accession, err);
+    console.error(`Error fetching genome ${acc}`, err);
     return null;
   }
 }
 
-// ============================================================
-// EXACT MATCHES
-// ============================================================
-function findMatches(genomeSeq, reportedSeq) {
+// ------------------------------------------------------------
+// FIND EXACT MATCHES + NEARBY GENES
+// ------------------------------------------------------------
+function findMatches(genome, reportedSeq) {
+  const genomeSeq = genome.seq.toUpperCase();
   const seq = reportedSeq.toUpperCase();
   const rev = revComp(seq);
   const len = seq.length;
 
   const results = [];
 
+  // forward strand
   let i = genomeSeq.indexOf(seq);
   while (i !== -1) {
     results.push({
+      genome,
       seq,
       reportedSeq,
       start: i,
@@ -80,9 +93,11 @@ function findMatches(genomeSeq, reportedSeq) {
     i = genomeSeq.indexOf(seq, i + 1);
   }
 
+  // reverse strand
   let j = genomeSeq.indexOf(rev);
   while (j !== -1) {
     results.push({
+      genome,
       seq: rev,
       reportedSeq,
       start: j,
@@ -92,71 +107,55 @@ function findMatches(genomeSeq, reportedSeq) {
     j = genomeSeq.indexOf(rev, j + 1);
   }
 
+  // annotate genes around site
+  results.forEach((m) => {
+    m.nearbyGenes = genome.genes.filter(
+      (g) => !(g.end < m.start || g.start > m.end)
+    );
+  });
+
   return results;
 }
 
-// ============================================================
-// NEARBY GENES (±150bp)
-// ============================================================
-function nearbyGenes(genes, match, dist = 150) {
-  return genes.filter((g) => {
-    return (
-      Math.abs(g.start - match.start) <= dist ||
-      Math.abs(g.end - match.end) <= dist
-    );
-  });
-}
-
-// ============================================================
-// COMPONENT
-// ============================================================
 export default function Step4ReportedSites() {
   const { genomeList } = useCuration();
 
   const [accordionOpen, setAccordionOpen] = useState({
     step1: true,
     step2: false,
-    step3: false,
-    step4: false,
   });
 
   const [siteType, setSiteType] = useState("motif");
   const [rawInput, setRawInput] = useState("");
-
   const [sites, setSites] = useState([]);
-  const [results, setResults] = useState([]);
+  const [genomes, setGenomes] = useState({});
+  const [matches, setMatches] = useState([]);
 
-  const [loadedGenomes, setLoadedGenomes] = useState({});
-
-  // ============================================================
-  // LOAD GENOMES
-  // ============================================================
+  // ------------------------------------------------------------
+  // LOAD GENOMES ONCE
+  // ------------------------------------------------------------
   useEffect(() => {
-    async function load() {
+    async function loadGenomes() {
       if (!genomeList?.length) return;
 
-      const data = {};
-
+      const result = {};
       for (const g of genomeList) {
         const acc = g.accession;
-        const gb = await fetchGenbank(acc);
-        if (gb) {
-          data[acc] = gb;
-        }
+        const data = await fetchGenome(acc);
+        if (data) result[acc] = data;
       }
 
-      setLoadedGenomes(data);
-
-      console.log("Loaded genomes:", data);
+      setGenomes(result);
+      console.log("Loaded genomes:", result);
     }
 
-    load();
+    loadGenomes();
   }, [genomeList]);
 
-  // ============================================================
-  // PARSE + SEARCH
-  // ============================================================
-  function handleParse() {
+  // ------------------------------------------------------------
+  // ON SAVE
+  // ------------------------------------------------------------
+  function handleSave() {
     const seqs = rawInput
       .split(/\r?\n/)
       .map((s) => s.trim().toUpperCase())
@@ -169,53 +168,60 @@ export default function Step4ReportedSites() {
     setAccordionOpen({
       step1: true,
       step2: true,
-      step3: false,
-      step4: false,
     });
   }
 
-  // ============================================================
-  // RUN SEARCH
-  // ============================================================
+  // ------------------------------------------------------------
+  // RUN MATCHES
+  // ------------------------------------------------------------
   function runSearch(seqs) {
-    if (!Object.keys(loadedGenomes).length) return;
+    if (!Object.keys(genomes).length) {
+      console.log("No genomes loaded");
+      return;
+    }
 
     const all = [];
 
     for (const seq of seqs) {
-      for (const [acc, obj] of Object.entries(loadedGenomes)) {
-        const hits = findMatches(obj.seq, seq);
+      for (const acc of Object.keys(genomes)) {
+        const genome = genomes[acc];
 
-        hits.forEach((hit) => {
+        if (!genome.seq) continue;
+
+        const hits = findMatches(genome, seq);
+
+        hits.forEach((h) => {
           all.push({
+            ...h,
             accession: acc,
-            ...hit,
-            nearby: nearbyGenes(obj.genes, hit),
           });
         });
       }
     }
 
-    setResults(all);
+    setMatches(all);
   }
 
-  // ============================================================
-  // UI
-  // ============================================================
+  // ------------------------------------------------------------
+  // UI TOGGLE
+  // ------------------------------------------------------------
   function toggleAccordion(step) {
-    setAccordionOpen((p) => ({ ...p, [step]: !p[step] }));
+    setAccordionOpen((p) => ({
+      ...p,
+      [step]: !p[step],
+    }));
   }
 
-  // ============================================================
+  // ------------------------------------------------------------
   // RENDER
-  // ============================================================
+  // ------------------------------------------------------------
   return (
     <div className="space-y-8">
       <h2 className="text-2xl font-bold">Step 4 – Reported sites</h2>
 
-      {/* ---------------------------------------------------------
-          ACCORDION 1
-      ---------------------------------------------------------- */}
+      {/** -------------------------------------------------------
+       *  ACCORDION 1
+       -------------------------------------------------------- */}
       <div className="bg-surface border border-border rounded p-4">
         <button
           className="flex justify-between w-full text-lg font-semibold mb-3"
@@ -226,12 +232,13 @@ export default function Step4ReportedSites() {
         </button>
 
         {accordionOpen.step1 && (
-          <div className="space-y-4">
-            {/* SITE TYPE */}
+          <div className="space-y-4 text-sm">
+
+            {/** SITE TYPE */}
             <div>
               <label className="block font-medium mb-1">Site type</label>
 
-              <div className="space-y-1 text-sm">
+              <div className="space-y-1">
                 <label className="flex gap-2 items-center">
                   <input
                     type="radio"
@@ -261,7 +268,7 @@ export default function Step4ReportedSites() {
               </div>
             </div>
 
-            {/* SITES INPUT */}
+            {/** TEXTAREA */}
             <div>
               <label className="block font-medium mb-1">Sites</label>
               <textarea
@@ -272,16 +279,16 @@ export default function Step4ReportedSites() {
               />
             </div>
 
-            <button className="btn" onClick={handleParse}>
+            <button className="btn" onClick={handleSave}>
               Save
             </button>
           </div>
         )}
       </div>
 
-      {/* ---------------------------------------------------------
-          ACCORDION 2
-      ---------------------------------------------------------- */}
+      {/** -------------------------------------------------------
+       *  ACCORDION 2
+       -------------------------------------------------------- */}
       <div className="bg-surface border border-border rounded p-4">
         <button
           className="flex justify-between w-full text-lg font-semibold mb-3"
@@ -293,35 +300,32 @@ export default function Step4ReportedSites() {
 
         {accordionOpen.step2 && (
           <div className="space-y-4 text-sm">
-            {results.length === 0 && (
+            {matches.length === 0 && (
               <p className="text-muted">No matches found.</p>
             )}
 
-            {results.map((m, i) => (
-              <div
-                key={i}
-                className="p-3 border border-border rounded bg-muted"
-              >
+            {matches.map((m, i) => (
+              <div key={i} className="p-2 border border-border rounded bg-muted">
                 <p className="font-medium">{m.reportedSeq}</p>
                 <p>
                   {m.accession}: [{m.start} – {m.end}] ({m.strand})
                 </p>
 
-                {m.nearby?.length > 0 && (
-                  <table className="text-sm mt-2 w-full">
+                {m.nearbyGenes?.length > 0 && (
+                  <table className="text-xs mt-2 w-full">
                     <thead>
-                      <tr className="text-left border-b border-border">
-                        <th className="pr-2">locus</th>
-                        <th className="pr-2">gene</th>
+                      <tr>
+                        <th>locus tag</th>
+                        <th>gene name</th>
                         <th>function</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {m.nearby.map((g, ix) => (
-                        <tr key={ix} className="border-b border-border/30">
-                          <td>{g.locus_tag || "-"}</td>
-                          <td>{g.gene || "-"}</td>
-                          <td>{g.product || "-"}</td>
+                      {m.nearbyGenes.map((g, j) => (
+                        <tr key={j}>
+                          <td>{g.locus_tag}</td>
+                          <td>{g.name}</td>
+                          <td>{g.function}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -330,40 +334,6 @@ export default function Step4ReportedSites() {
               </div>
             ))}
           </div>
-        )}
-      </div>
-
-      {/* ---------------------------------------------------------
-          ACCORDION 3 (placeholder)
-      ---------------------------------------------------------- */}
-      <div className="bg-surface border border-border rounded p-4 opacity-40">
-        <button
-          className="flex justify-between w-full text-lg font-semibold mb-3"
-          onClick={() => toggleAccordion("step3")}
-        >
-          <span>3. Inexact matches</span>
-          <span>{accordionOpen.step3 ? "▲" : "▼"}</span>
-        </button>
-
-        {accordionOpen.step3 && (
-          <p className="text-sm text-muted">Not implemented yet.</p>
-        )}
-      </div>
-
-      {/* ---------------------------------------------------------
-          ACCORDION 4 (placeholder)
-      ---------------------------------------------------------- */}
-      <div className="bg-surface border border-border rounded p-4 opacity-40">
-        <button
-          className="flex justify-between w-full text-lg font-semibold mb-3"
-          onClick={() => toggleAccordion("step4")}
-        >
-          <span>4. Annotate sites</span>
-          <span>{accordionOpen.step4 ? "▲" : "▼"}</span>
-        </button>
-
-        {accordionOpen.step4 && (
-          <p className="text-sm text-muted">Not implemented yet.</p>
         )}
       </div>
     </div>
