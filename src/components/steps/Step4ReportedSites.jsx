@@ -42,6 +42,10 @@ export default function Step4ReportedSites() {
     a4: true,
   });
 
+  function toggleAcc(k) {
+    setAccordion((p) => ({ ...p, [k]: !p[k] }));
+  }
+
   // User input
   const [siteType, setSiteType] = useState("variable");
   const [rawSites, setRawSites] = useState("");
@@ -108,7 +112,7 @@ export default function Step4ReportedSites() {
     load();
   }, [genomeList]);
 
-    // =======================================================
+  // =======================================================
   // SEARCH EXACT MATCHES
   // =======================================================
 
@@ -229,12 +233,8 @@ export default function Step4ReportedSites() {
   }
 
   // =======================================================
-  // UI
+  // RENDER
   // =======================================================
-
-  function toggleAcc(k) {
-    setAccordion((p) => ({ ...p, [k]: !p[k] }));
-  }
 
   return (
     <div className="space-y-8">
@@ -251,7 +251,7 @@ export default function Step4ReportedSites() {
 
         {accordion.a1 && (
           <div className="space-y-3 text-sm">
-            {/* site type */}
+
             <div className="space-y-1">
               <label className="flex gap-2">
                 <input type="radio" checked={siteType === "motif"}
@@ -396,9 +396,9 @@ export default function Step4ReportedSites() {
                       <input
                         type="radio"
                         name={`fz-${site}`}
-                        checked={choice[site] === "fz-none"}
+                        checked={choice[site] === "none-both"}
                         onChange={() => {
-                          setChoice((p) => ({ ...p, [site]: "fz-none" }));
+                          setChoice((p) => ({ ...p, [site]: "none-both" }));
                           setAccordion((p) => ({ ...p, a4: true }));
                         }}
                       />
@@ -411,6 +411,7 @@ export default function Step4ReportedSites() {
           )}
         </div>
       )}
+
       {/* =======================================================
           ACCORDION 4 — SITE ANNOTATION
       ======================================================= */}
@@ -424,8 +425,6 @@ export default function Step4ReportedSites() {
 
         {accordion.a4 && (
           <div className="text-sm">
-
-            {/* HEADER */}
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-border">
@@ -437,6 +436,7 @@ export default function Step4ReportedSites() {
               </thead>
 
               <tbody>
+
                 {/* BULK ROW */}
                 <tr className="border-b border-border bg-muted/40">
                   <td className="px-2 py-1">
@@ -461,6 +461,7 @@ export default function Step4ReportedSites() {
                       Select/Unselect all
                     </button>
                   </td>
+
                   <td className="px-2 py-1">
                     <div className="flex flex-col gap-1">
                       <select
@@ -525,10 +526,9 @@ export default function Step4ReportedSites() {
 
                   <td className="px-2 py-1">
                     <div className="flex flex-col gap-1">
+                      {/* ✔️ SOLO NOMBRE DE LAS TÉCNICAS */}
                       <span className="text-xs">
-                        {techniques?.map((t) =>
-                          typeof t === "string" ? t : t.name
-                        ).join(", ") || "—"}
+                        {techniques?.map((t) => t.name).join(", ") || "—"}
                       </span>
 
                       {techniques?.length > 0 && (
@@ -580,20 +580,34 @@ export default function Step4ReportedSites() {
 
                   const sel = choice[site];
 
-                  let text = site;
                   const ex = exactHits[site];
                   const fz = fuzzyHits[site];
 
+                  let text = site;
+
+                  // exact match
                   if (sel && sel.startsWith("ex-")) {
                     const idx = parseInt(sel.split("-")[1]);
                     const h = ex[idx];
-                    text = `${h.site} ${h.strand}[${h.start + 1},${h.end + 1}] ${h.acc}`;
+                    if (h)
+                      text = `${h.site} ${h.strand}[${h.start + 1},${
+                        h.end + 1
+                      }] ${h.acc}`;
                   }
 
-                  if (sel && sel.startsWith("fz-")) {
+                  // fuzzy match
+                  else if (sel && sel.startsWith("fz-")) {
                     const idx = parseInt(sel.split("-")[1]);
                     const h = fz[idx];
-                    text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${h.start + 1},${h.end + 1}] ${h.acc}`;
+                    if (h)
+                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${
+                        h.start + 1
+                      },${h.end + 1}] ${h.acc}`;
+                  }
+
+                  // both no match
+                  else if (sel === "none-both") {
+                    text = site;
                   }
 
                   return (
@@ -666,9 +680,8 @@ export default function Step4ReportedSites() {
                                 }))
                               }
                             />
-                            {techniques
-                              .map((t) => (typeof t === "string" ? t : t.name))
-                              .join(", ")}
+                            {/* ✔️ SOLO NOMBRE DE LAS TÉCNICAS */}
+                            {techniques.map((t) => t.name).join(", ")}
                           </label>
                         ) : (
                           <span className="text-muted">—</span>
