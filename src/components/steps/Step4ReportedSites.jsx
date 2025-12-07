@@ -1,633 +1,312 @@
 import React, { useState, useEffect } from "react";
 import { useCuration } from "../../context/CurationContext";
 
-// ========================= Helpers básicos =========================
+// =======================================================
+// UTILS
+// =======================================================
 
 function revComp(seq) {
   const map = { A: "T", T: "A", C: "G", G: "C" };
   return seq
-    .toUpperCase()
     .split("")
     .reverse()
-    .map((n) => map[n] || "N")
+    .map((b) => map[b] || "N")
     .join("");
 }
 
 function mismatches(a, b) {
   let n = 0;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) n++;
-  }
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
   return n;
 }
 
 function buildBars(a, b) {
   return a
     .split("")
-    .map((c, i) => (c === b[i] ? "|" : " "))
+    .map((c, i) => (a[i] === b[i] ? "|" : " "))
     .join("");
 }
 
-// ------------ Parser GenBank para sacar genes (más robusto) --------
-
-function parseGenesFromGenBank(txt) {
-  const genes = [];
-  const lines = txt.split("\n");
-  let current = null;
-
-  for (const raw of lines) {
-    const line = raw.trim();
-
-    // FEATURE gene: puede ser "gene            190..255"
-    // o "gene            complement(123..456)" etc.
-    if (line.startsWith("gene")) {
-      // quitamos "gene" + espacios
-      let coords = line.replace(/^gene\s+/, "");
-
-      // complement(123..456)
-      if (coords.startsWith("complement(")) {
-        coords = coords.slice("complement(".length, -1);
-      }
-
-      const [startStr, endStr] = coords.split("..");
-      const start = parseInt(startStr, 10);
-      const end = parseInt(endStr, 10);
-
-      current = {
-        start: isNaN(start) ? 1 : start,
-        end: isNaN(end) ? start : end,
-        locus_tag: "",
-        gene_name: "",
-        function: "",
-      };
-      genes.push(current);
-      continue;
-    }
-
-    if (!current) continue;
-
-    if (line.startsWith("/locus_tag=")) {
-      current.locus_tag = line.split("=")[1].replace(/"/g, "");
-    }
-
-    if (line.startsWith("/gene=")) {
-      current.gene_name = line.split("=")[1].replace(/"/g, "");
-    }
-
-    if (line.startsWith("/product=") || line.startsWith("/function=")) {
-      const value = line.split("=")[1].replace(/"/g, "");
-      // Si ya había algo, concatenamos (suele haber varias /function)
-      current.function = current.function
-        ? `${current.function}; ${value}`
-        : value;
-    }
-  }
-
-  return genes;
-}
-
-// -------------------- Buscar matches exactos -----------------------
-
-function findExactMatches(genomeSeq, site) {
-  const seq = site.toUpperCase();
-  const rc = revComp(seq);
-  const len = seq.length;
-
-  const hits = [];
-
-  // hebra +
-  let i = genomeSeq.indexOf(seq);
-  while (i !== -1) {
-    hits.push({
-      siteSeq: seq,
-      genomeSeq: seq,
-      start: i,
-      end: i + len - 1,
-      strand: "+",
-    });
-    i = genomeSeq.indexOf(seq, i + 1);
-  }
-
-  // hebra -
-  let j = genomeSeq.indexOf(rc);
-  while (j !== -1) {
-    hits.push({
-      siteSeq: seq,
-      genomeSeq: rc,
-      start: j,
-      end: j + len - 1,
-      strand: "-",
-    });
-    j = genomeSeq.indexOf(rc, j + 1);
-  }
-
-  return hits;
-}
-
-// -------------------- Buscar matches con mismatches ----------------
-
-function findFuzzyMatches(genomeSeq, site, max = 2) {
-  const seq = site.toUpperCase();
-  const rc = revComp(seq);
-  const len = seq.length;
-  const res = [];
-
-  for (let i = 0; i <= genomeSeq.length - len; i++) {
-    const sub = genomeSeq.slice(i, i + len);
-
-    const mmF = mismatches(sub, seq);
-    if (mmF > 0 && mmF <= max) {
-      res.push({
-        siteSeq: seq,
-        genomeSeq: sub,
-        bars: buildBars(seq, sub),
-        start: i,
-        end: i + len - 1,
-        strand: "+",
-      });
-    }
-
-    const mmR = mismatches(sub, rc);
-    if (mmR > 0 && mmR <= max) {
-      res.push({
-        siteSeq: rc,
-        genomeSeq: sub,
-        bars: buildBars(rc, sub),
-        start: i,
-        end: i + len - 1,
-        strand: "-",
-      });
-    }
-  }
-
-  return res;
-}
-
-// -------------------- Genes más cercanos a un sitio ----------------
-
-function findNearbyGenes(genes, hit) {
-  if (!genes || !genes.length) return [];
-
-  const withDist = genes.map((g) => {
-    const d = Math.max(g.start, hit.start) - Math.min(g.end, hit.end);
-    return { ...g, _dist: d };
-  });
-
-  const min = Math.min(...withDist.map((g) => g._dist));
-  return withDist.filter((g) => g._dist === min);
-}
-
-// Opciones de TF-type y TF-function
-const TF_TYPES = ["monomer", "dimer", "tetramer", "other", "not specified"];
-const TF_FUNCS = ["activator", "repressor", "dual", "not specified"];
-
-// ===================================================================
-// COMPONENTE PRINCIPAL
-// ===================================================================
+// =======================================================
+// COMPONENTE
+// =======================================================
 
 export default function Step4ReportedSites() {
   const { genomeList, techniques } = useCuration();
 
-  // Estado de acordeones
-  const [accordionOpen, setAccordionOpen] = useState({
-    step1: true,
-    step2: true,
-    step3: false,
-    step4: true,
+  const [accordion, setAccordion] = useState({
+    a1: true,
+    a2: true,
+    a3: false,
+    a4: true,
   });
 
-  const [fuzzyVisible, setFuzzyVisible] = useState(false); // <== para que no desaparezca el 3er acordeón
-
   const [siteType, setSiteType] = useState("variable");
-  const [rawInput, setRawInput] = useState("");
+  const [rawSites, setRawSites] = useState("");
+
   const [sites, setSites] = useState([]);
 
-  const [genomeData, setGenomeData] = useState({});
-  const [exactMatches, setExactMatches] = useState([]);
-  const [fuzzyMatches, setFuzzyMatches] = useState({});
-  const [selectedMatch, setSelectedMatch] = useState({});
-  const [finalChoice, setFinalChoice] = useState({});
+  const [genomes, setGenomes] = useState([]);
+  const [exactHits, setExactHits] = useState({});
+  const [fuzzyHits, setFuzzyHits] = useState({});
 
-  const [loadingGenomes, setLoadingGenomes] = useState(false);
+  const [choice, setChoice] = useState({});
+  const [showFuzzy, setShowFuzzy] = useState(false);
 
-  // Anotación de cada sitio (acordeón 4)
-  // { [site]: { selected:boolean, tfType, tfFunc, useTechniques:boolean } }
-  const [siteAnnotations, setSiteAnnotations] = useState({});
+  // Acordeón 4 data
+  const [annotations, setAnnotations] = useState({});
 
-  // selects globales (Apply to selected)
-  const [bulkTfType, setBulkTfType] = useState("monomer");
-  const [bulkTfFunc, setBulkTfFunc] = useState("activator");
-
-  const PROXY = "https://corsproxy.io/?";
-  const ENTREZ_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
-
-  // ---------- helpers UI ----------
-
-  function toggleAccordion(stepKey) {
-    setAccordionOpen((prev) => ({
-      ...prev,
-      [stepKey]: !prev[stepKey],
-    }));
-  }
-
-  const showFuzzy = fuzzyVisible; // ya no depende de selectedMatch
-
-  function techniqueLabel(t) {
-    if (!t) return "";
-    if (typeof t === "string") return t;
-    if (t.name) return t.name;
-    if (t.eco) return t.eco;
-    return "";
-  }
-
-  const techniquesText =
-    techniques && techniques.length
-      ? techniques.map((t) => techniqueLabel(t)).join(", ")
-      : "(no techniques added in Step 3)";
-
-  // ===================================================================
-  // Cargar genomas (GenBank full) y parsear anotaciones
-  // ===================================================================
+  // =======================================================
+  // CARGAR GENOMAS COMO ANTES (SOLO SECUENCIA)
+  // =======================================================
 
   useEffect(() => {
-    async function loadGenomes() {
-      if (!genomeList || genomeList.length === 0) return;
+    if (!genomeList || genomeList.length === 0) return;
 
-      setLoadingGenomes(true);
-      const store = {};
+    async function load() {
+      const out = [];
 
       for (const g of genomeList) {
         try {
-          const url = `${ENTREZ_BASE}/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gb&retmode=text`;
-          const res = await fetch(PROXY + encodeURIComponent(url));
+          // IMPORTANTE: usar tu proxy y endpoint original
+          const url = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=fasta&retmode=text`;
+
+          const res = await fetch(url);
           const txt = await res.text();
 
-          // Secuencia: nos quedamos solo con la parte de ORIGIN
-          const originIndex = txt.indexOf("ORIGIN");
-          let seq = "";
-          if (originIndex !== -1) {
-            const originPart = txt.slice(originIndex);
-            seq = originPart
-              .split("\n")
-              .slice(1) // saltar línea "ORIGIN"
-              .join("")
-              .replace(/[^ATCGatcg]/g, "")
-              .toUpperCase();
-          }
+          const seq = txt
+            .replace(/>.*/g, "")
+            .replace(/[^ATCGatcg]/g, "")
+            .toUpperCase();
 
-          const genes = parseGenesFromGenBank(txt);
-
-          store[g.accession] = {
+          out.push({
             acc: g.accession,
             sequence: seq,
-            genes,
-          };
+          });
         } catch (err) {
           console.error(err);
         }
       }
 
-      setGenomeData(store);
-      setLoadingGenomes(false);
+      setGenomes(out);
     }
 
-    loadGenomes();
+    load();
   }, [genomeList]);
 
-  // ===================================================================
-  // Procesar sitios y buscar matches exactos
-  // ===================================================================
+  // =======================================================
+  // BUSCAR EXACT MATCHES (VERSIÓN ORIGINAL)
+  // =======================================================
 
-  function handleSaveSites() {
-    const seqs = rawInput
-      .split(/\r?\n/)
+  function searchExact() {
+    const arr = rawSites
+      .split(/\r?\n/g)
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean);
 
-    setSites(seqs);
+    setSites(arr);
 
-    const all = [];
+    const all = {};
 
-    seqs.forEach((site) => {
-      for (const g of Object.values(genomeData)) {
-        const hits = findExactMatches(g.sequence, site);
-        hits.forEach((h) => {
-          const nearby = findNearbyGenes(g.genes, h);
-          all.push({ ...h, genomeAcc: g.acc, nearbyGenes: nearby });
-        });
+    arr.forEach((site) => {
+      const rc = revComp(site);
+      all[site] = [];
+
+      genomes.forEach((g) => {
+        const seq = g.sequence;
+        const L = site.length;
+
+        // +
+        let i = seq.indexOf(site);
+        while (i !== -1) {
+          all[site].push({
+            seq: site,
+            match: site,
+            start: i,
+            end: i + L - 1,
+            strand: "+",
+            acc: g.acc,
+          });
+          i = seq.indexOf(site, i + 1);
+        }
+
+        // -
+        let j = seq.indexOf(rc);
+        while (j !== -1) {
+          all[site].push({
+            seq: site,
+            match: rc,
+            start: j,
+            end: j + L - 1,
+            strand: "-",
+            acc: g.acc,
+          });
+          j = seq.indexOf(rc, j + 1);
+        }
+      });
+
+      if (all[site].length === 0) all[site].push("none");
+    });
+
+    setExactHits(all);
+
+    // inicializar choice
+    const ch = {};
+    arr.forEach((s) => (ch[s] = null));
+    setChoice(ch);
+
+    // reset fuzzy
+    setFuzzyHits({});
+    setShowFuzzy(false);
+  }
+
+  // =======================================================
+  // BUSCAR MISMATCHES (VERSIÓN ORIGINAL)
+  // =======================================================
+
+  function searchFuzzy(site) {
+    const L = site.length;
+    const rc = revComp(site);
+
+    const found = [];
+
+    genomes.forEach((g) => {
+      const seq = g.sequence;
+
+      for (let i = 0; i <= seq.length - L; i++) {
+        const sub = seq.slice(i, i + L);
+
+        const mmF = mismatches(sub, site);
+        if (mmF > 0 && mmF <= 2) {
+          found.push({
+            site,
+            match: sub,
+            bars: buildBars(site, sub),
+            start: i,
+            end: i + L - 1,
+            strand: "+",
+            acc: g.acc,
+          });
+        }
+
+        const mmR = mismatches(sub, rc);
+        if (mmR > 0 && mmR <= 2) {
+          found.push({
+            site,
+            match: sub,
+            bars: buildBars(rc, sub),
+            start: i,
+            end: i + L - 1,
+            strand: "-",
+            acc: g.acc,
+          });
+        }
       }
     });
 
-    setExactMatches(all);
+    if (found.length === 0) found.push("none");
 
-    // reset estados por sitio
-    const sel = {};
-    const annot = {};
-    seqs.forEach((s) => {
-      sel[s] = null;
-      annot[s] = {
-        selected: false,
-        tfType: "monomer",
-        tfFunc: "activator",
-        useTechniques: false,
-      };
-    });
-
-    setSelectedMatch(sel);
-    setFinalChoice(sel);
-    setSiteAnnotations(annot);
-    setFuzzyMatches({});
-    setFuzzyVisible(false);
+    setFuzzyHits((p) => ({ ...p, [site]: found }));
+    setShowFuzzy(true);
   }
 
-  // ===================================================================
-  // Buscar mismatches (cuando se pulsa "No valid match" en exactos)
-  // ===================================================================
-
-  function computeFuzzy(site) {
-    const all = [];
-
-    for (const g of Object.values(genomeData)) {
-      const hits = findFuzzyMatches(g.sequence, site, 2);
-      hits.forEach((h) => {
-        const nearby = findNearbyGenes(g.genes, h);
-        all.push({ ...h, genomeAcc: g.acc, nearbyGenes: nearby });
-      });
-    }
-
-    setFuzzyMatches((prev) => ({ ...prev, [site]: all }));
-    setFuzzyVisible(true); // <- una vez activado, el acordeón 3 ya no desaparece
-  }
-
-  // ===================================================================
-  // Helpers Site Annotation (acordeón 4)
-  // ===================================================================
-
-  function toggleSiteSelected(site) {
-    setSiteAnnotations((prev) => ({
-      ...prev,
-      [site]: { ...prev[site], selected: !prev[site]?.selected },
-    }));
-  }
-
-  function updateSiteTfType(site, value) {
-    setSiteAnnotations((prev) => ({
-      ...prev,
-      [site]: { ...prev[site], tfType: value },
-    }));
-  }
-
-  function updateSiteTfFunc(site, value) {
-    setSiteAnnotations((prev) => ({
-      ...prev,
-      [site]: { ...prev[site], tfFunc: value },
-    }));
-  }
-
-  function updateSiteUseTech(site, value) {
-    setSiteAnnotations((prev) => ({
-      ...prev,
-      [site]: { ...prev[site], useTechniques: value },
-    }));
-  }
-
-  function selectUnselectAll() {
-    const anySelected = sites.some((s) => siteAnnotations[s]?.selected);
-    const next = {};
-    sites.forEach((s) => {
-      next[s] = {
-        ...(siteAnnotations[s] || {
-          tfType: "monomer",
-          tfFunc: "activator",
-          useTechniques: false,
-        }),
-        selected: !anySelected,
-      };
-    });
-    setSiteAnnotations(next);
-  }
-
-  function applyTfTypeToSelected() {
-    const next = {};
-    sites.forEach((s) => {
-      const prev = siteAnnotations[s] || {
-        selected: false,
-        tfType: "monomer",
-        tfFunc: "activator",
-        useTechniques: false,
-      };
-      next[s] = {
-        ...prev,
-        tfType: prev.selected ? bulkTfType : prev.tfType,
-      };
-    });
-    setSiteAnnotations(next);
-  }
-
-  function applyTfFuncToSelected() {
-    const next = {};
-    sites.forEach((s) => {
-      const prev = siteAnnotations[s] || {
-        selected: false,
-        tfType: "monomer",
-        tfFunc: "activator",
-        useTechniques: false,
-      };
-      next[s] = {
-        ...prev,
-        tfFunc: prev.selected ? bulkTfFunc : prev.tfFunc,
-      };
-    });
-    setSiteAnnotations(next);
-  }
-
-  function applyTechniquesToSelected() {
-    const next = {};
-    sites.forEach((s) => {
-      const prev = siteAnnotations[s] || {
-        selected: false,
-        tfType: "monomer",
-        tfFunc: "activator",
-        useTechniques: false,
-      };
-      next[s] = {
-        ...prev,
-        useTechniques: prev.selected ? true : prev.useTechniques,
-      };
-    });
-    setSiteAnnotations(next);
-  }
-
-  function clearTechniques() {
-    const next = {};
-    sites.forEach((s) => {
-      const prev = siteAnnotations[s] || {
-        selected: false,
-        tfType: "monomer",
-        tfFunc: "activator",
-        useTechniques: false,
-      };
-      next[s] = { ...prev, useTechniques: false };
-    });
-    setSiteAnnotations(next);
-  }
-
-  // ===================================================================
-  // RENDER
-  // ===================================================================
+  // =======================================================
+  // UI
+  // =======================================================
 
   return (
     <div className="space-y-8">
-      <h2 className="text-2xl font-bold">Step 4 – Reported sites</h2>
 
-      {/* --------------------------------------------------------------
-          1. REPORTED SITES
-      -------------------------------------------------------------- */}
+      {/* =======================================================
+          1: REPORTED SITES
+      ======================================================= */}
       <div className="bg-surface border border-border rounded p-4">
-        <button
-          className="flex justify-between w-full text-lg font-semibold mb-3"
-          onClick={() => toggleAccordion("step1")}
-        >
+        <button className="flex justify-between w-full font-semibold mb-3"
+          onClick={() => setAccordion(p => ({ ...p, a1: !p.a1 }))}>
           <span>Reported sites</span>
-          <span>{accordionOpen.step1 ? "▲" : "▼"}</span>
+          <span>{accordion.a1 ? "▲" : "▼"}</span>
         </button>
 
-        {accordionOpen.step1 && (
-          <div className="space-y-4 text-sm">
-            {/* Site type */}
-            <div className="space-y-2">
-              <p className="font-medium">Site type</p>
-
+        {accordion.a1 && (
+          <div className="space-y-3 text-sm">
+            <div>
               <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={siteType === "motif"}
-                  onChange={() => setSiteType("motif")}
-                />
+                <input type="radio" checked={siteType === "motif"}
+                  onChange={() => setSiteType("motif")} />
                 <span>motif-associated (new motif)</span>
               </label>
 
               <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={siteType === "variable"}
-                  onChange={() => setSiteType("variable")}
-                />
+                <input type="radio" checked={siteType === "variable"}
+                  onChange={() => setSiteType("variable")} />
                 <span>variable motif associated</span>
               </label>
 
               <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={siteType === "nonmotif"}
-                  onChange={() => setSiteType("nonmotif")}
-                />
+                <input type="radio" checked={siteType === "nonmotif"}
+                  onChange={() => setSiteType("nonmotif")} />
                 <span>non-motif associated</span>
               </label>
             </div>
 
-            {/* sitios */}
             <textarea
               className="form-control w-full h-40 text-sm"
-              value={rawInput}
-              onChange={(e) => setRawInput(e.target.value)}
-              placeholder={"AAGATTACATT\nAAGATAACATT"}
+              value={rawSites}
+              onChange={(e) => setRawSites(e.target.value)}
             />
 
-            <button className="btn" onClick={handleSaveSites}>
-              {loadingGenomes ? "Loading genomes..." : "Save"}
-            </button>
+            <button className="btn" onClick={searchExact}>Save</button>
           </div>
         )}
       </div>
 
-      {/* --------------------------------------------------------------
-          2. EXACT MATCHES
-      -------------------------------------------------------------- */}
+      {/* =======================================================
+          2: EXACT MATCHES
+      ======================================================= */}
       <div className="bg-surface border border-border rounded p-4">
-        <button
-          className="flex justify-between w-full text-lg font-semibold mb-3"
-          onClick={() => toggleAccordion("step2")}
-        >
+        <button className="flex justify-between w-full font-semibold mb-3"
+          onClick={() => setAccordion(p => ({ ...p, a2: !p.a2 }))}>
           <span>Exact site matches</span>
-          <span>{accordionOpen.step2 ? "▲" : "▼"}</span>
+          <span>{accordion.a2 ? "▲" : "▼"}</span>
         </button>
 
-        {accordionOpen.step2 && (
+        {accordion.a2 && (
           <div className="space-y-4 text-sm">
             {sites.map((site) => {
-              const hits = exactMatches.filter((m) => m.siteSeq === site);
-              const sel = selectedMatch[site];
+              const arr = exactHits[site] || [];
 
               return (
-                <div
-                  key={site}
-                  className="border border-border rounded p-3 space-y-2"
-                >
-                  <h4 className="font-semibold text-accent">{site}</h4>
+                <div key={site} className="border border-border rounded p-3 space-y-2">
+                  <div className="font-semibold text-accent">{site}</div>
 
-                  {hits.map((m, i) => (
-                    <label
-                      key={i}
-                      className="flex items-start gap-2 cursor-pointer"
-                    >
-                      <input
-                        type="radio"
-                        name={`match-${site}`}
-                        checked={sel === i}
-                        onChange={() => {
-                          setSelectedMatch((p) => ({ ...p, [site]: i }));
-                          setFinalChoice((p) => ({
-                            ...p,
-                            [site]: { type: "exact", data: m },
-                          }));
-                          setAccordionOpen((p) => ({ ...p, step4: true }));
-                        }}
-                      />
-
-                      <div className="font-mono text-xs flex-1 leading-4">
-                        {m.siteSeq} {m.strand}[{m.start + 1},{m.end + 1}]{" "}
-                        {m.genomeAcc}
-                        {m.nearbyGenes?.length > 0 && (
-                          <table className="text-xs w-full mt-1">
-                            <thead>
-                              <tr className="border-b border-border">
-                                <th className="text-left pr-4">locus tag</th>
-                                <th className="text-left pr-4">gene name</th>
-                                <th className="text-left">function</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {m.nearbyGenes.map((g, gi) => (
-                                <tr key={gi}>
-                                  <td className="pr-4">{g.locus_tag || "—"}</td>
-                                  <td className="pr-4">
-                                    {g.gene_name || "—"}
-                                  </td>
-                                  <td>{g.function || "—"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                    </label>
+                  {arr.map((hit, i) => (
+                    hit !== "none" ? (
+                      <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="radio"
+                          name={`ex-${site}`}
+                          checked={choice[site] === `ex-${i}`}
+                          onChange={() => {
+                            setChoice(p => ({ ...p, [site]: `ex-${i}` }));
+                            setAccordion(p => ({ ...p, a4: true }));
+                          }}
+                        />
+                        <span className="font-mono">
+                          {hit.seq} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                        </span>
+                      </label>
+                    ) : null
                   ))}
 
-                  {/* No valid match */}
                   <label className="flex items-center gap-2 text-xs cursor-pointer mt-2">
                     <input
                       type="radio"
-                      name={`match-${site}`}
-                      checked={sel === "none"}
+                      name={`ex-${site}`}
+                      checked={choice[site] === "none"}
                       onChange={() => {
-                        setSelectedMatch((p) => ({ ...p, [site]: "none" }));
-                        setFinalChoice((p) => ({
-                          ...p,
-                          [site]: { type: "none" },
-                        }));
-                        computeFuzzy(site);
-                        setAccordionOpen((p) => ({ ...p, step3: true }));
+                        setChoice(p => ({ ...p, [site]: "none" }));
+                        searchFuzzy(site);
+                        setAccordion(p => ({ ...p, a3: true }));
                       }}
                     />
                     <span>No valid match.</span>
@@ -639,108 +318,60 @@ export default function Step4ReportedSites() {
         )}
       </div>
 
-      {/* --------------------------------------------------------------
-          3. INEXACT MATCHES (mismatches)
-      -------------------------------------------------------------- */}
+      {/* =======================================================
+          3: INEXACT MATCHES (MISMATCHES)
+      ======================================================= */}
       {showFuzzy && (
         <div className="bg-surface border border-border rounded p-4">
-          <button
-            className="flex justify-between w-full text-lg font-semibold mb-3"
-            onClick={() => toggleAccordion("step3")}
-          >
+          <button className="flex justify-between w-full font-semibold mb-3"
+            onClick={() => setAccordion(p => ({ ...p, a3: !p.a3 }))}>
             <span>Inexact matches (mismatches)</span>
-            <span>{accordionOpen.step3 ? "▲" : "▼"}</span>
+            <span>{accordion.a3 ? "▲" : "▼"}</span>
           </button>
 
-          {accordionOpen.step3 && (
+          {accordion.a3 && (
             <div className="space-y-4 text-sm">
               {sites.map((site) => {
-                if (selectedMatch[site] !== "none" && !fuzzyMatches[site])
-                  return null;
-
-                const arr = fuzzyMatches[site] || [];
-                const sel = selectedMatch[site];
+                const arr = fuzzyHits[site];
+                if (!arr) return null;
 
                 return (
-                  <div
-                    key={site}
-                    className="border border-border rounded p-3 space-y-2"
-                  >
-                    <h4 className="font-semibold text-accent">{site}</h4>
+                  <div key={site}
+                    className="border border-border rounded p-3 space-y-2">
+                    <div className="font-semibold text-accent">{site}</div>
 
-                    {arr.map((m, i) => (
-                      <label
-                        key={i}
-                        className="flex items-start gap-2 cursor-pointer"
-                      >
-                        <input
-                          type="radio"
-                          name={`fuzzy-${site}`}
-                          checked={sel === `fz-${i}`}
-                          onChange={() => {
-                            setSelectedMatch((p) => ({
-                              ...p,
-                              [site]: `fz-${i}`,
-                            }));
-                            setFinalChoice((p) => ({
-                              ...p,
-                              [site]: { type: "fuzzy", data: m },
-                            }));
-                            setAccordionOpen((p) => ({ ...p, step4: true }));
-                          }}
-                        />
+                    {arr.map((hit, i) =>
+                      hit !== "none" ? (
+                        <label key={i}
+                          className="flex items-start gap-2 text-xs cursor-pointer">
+                          <input
+                            type="radio"
+                            name={`fz-${site}`}
+                            checked={choice[site] === `fz-${i}`}
+                            onChange={() => {
+                              setChoice(p => ({ ...p, [site]: `fz-${i}` }));
+                              setAccordion(p => ({ ...p, a4: true }));
+                            }}
+                          />
+                          <span className="font-mono whitespace-pre">
+                            {hit.seq}
+                            {"\n"}
+                            {hit.bars}
+                            {"\n"}
+                            {hit.match} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                          </span>
+                        </label>
+                      ) : null
+                    )}
 
-                        <div className="font-mono text-xs flex-1 leading-4 whitespace-pre">
-                          {m.siteSeq}
-                          {"\n"}
-                          {m.bars}
-                          {"\n"}
-                          {m.genomeSeq} {m.strand}[{m.start + 1},{m.end + 1}]{" "}
-                          {m.genomeAcc}
-                          {m.nearbyGenes?.length > 0 && (
-                            <table className="text-xs w-full mt-1">
-                              <thead>
-                                <tr className="border-b border-border">
-                                  <th className="text-left pr-4">locus tag</th>
-                                  <th className="text-left pr-4">gene name</th>
-                                  <th className="text-left">function</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {m.nearbyGenes.map((g, gi) => (
-                                  <tr key={gi}>
-                                    <td className="pr-4">
-                                      {g.locus_tag || "—"}
-                                    </td>
-                                    <td className="pr-4">
-                                      {g.gene_name || "—"}
-                                    </td>
-                                    <td>{g.function || "—"}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      </label>
-                    ))}
-
-                    {/* No valid match en mismatches */}
                     <label className="flex items-center gap-2 text-xs cursor-pointer mt-2">
                       <input
                         type="radio"
-                        name={`fuzzy-${site}`}
-                        checked={sel === "fz-none"}
+                        name={`fz-${site}`}
+                        checked={choice[site] === "fz-none"}
                         onChange={() => {
-                          setSelectedMatch((p) => ({
-                            ...p,
-                            [site]: "fz-none",
-                          }));
-                          setFinalChoice((p) => ({
-                            ...p,
-                            [site]: { type: "none" },
-                          }));
-                          setAccordionOpen((p) => ({ ...p, step4: true }));
+                          setChoice(p => ({ ...p, [site]: "fz-none" }));
+                          setAccordion(p => ({ ...p, a4: true }));
                         }}
                       />
                       <span>No valid match.</span>
@@ -753,10 +384,10 @@ export default function Step4ReportedSites() {
         </div>
       )}
 
-      {/* --------------------------------------------------------------
-          4. SITE ANNOTATION (tabla tipo CollecTF)
-      -------------------------------------------------------------- */}
-      <div className="bg-surface border border-border rounded p-4">
+      {/* =======================================================
+          4: SITE ANNOTATION (el tuyo actual)
+      ======================================================= */}
+           <div className="bg-surface border border-border rounded p-4">
         <button
           className="flex justify-between w-full text-lg font-semibold mb-3"
           onClick={() => toggleAccordion("step4")}
