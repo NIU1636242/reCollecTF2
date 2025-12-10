@@ -121,54 +121,53 @@ export default function Step4ReportedSites() {
           const entry = parsed?.[0];
           const features = entry?.features || [];
 
-          // 🔴 CAMBIO 1: fusionar gene + CDS por locus_tag
-          // y coger function/product/note de donde esté.
-          const geneMap = {};
+          // --- MERGE gene + CDS POR locus_tag, PREFIRIENDO FUNCTION DE CDS ---
+          const locusMap = new Map();
 
-          features.forEach((f) => {
-            if (f.type !== "gene" && f.type !== "CDS") return;
+          for (const f of features) {
+            if (f.type !== "gene" && f.type !== "CDS") continue;
 
-            const locus = f.notes?.locus_tag?.[0];
-            if (!locus) return;
+            const locus = f.notes?.locus_tag?.[0] || "";
+            if (!locus) continue;
 
-            if (!geneMap[locus]) {
-              geneMap[locus] = {
+            const geneName = f.notes?.gene?.[0] || "";
+            const func =
+              f.notes?.function?.[0] || f.notes?.product?.[0] || "";
+            const start = f.start;
+            const end = f.end;
+
+            if (!locusMap.has(locus)) {
+              locusMap.set(locus, {
                 locus,
-                gene: "",
-                function: "",
-                start: f.start,
-                end: f.end,
-              };
+                gene: geneName,
+                function: func,
+                start,
+                end,
+                hasCDS: f.type === "CDS",
+              });
+            } else {
+              const existing = locusMap.get(locus);
+              existing.start = Math.min(existing.start, start);
+              existing.end = Math.max(existing.end, end);
+
+              if (!existing.gene && geneName) {
+                existing.gene = geneName;
+              }
+
+              // Si esta feature es CDS y trae función, la usamos
+              if (f.type === "CDS" && func) {
+                existing.function = func;
+                existing.hasCDS = true;
+              } else if (!existing.function && func) {
+                // Si aún no teníamos ninguna función, cogemos la que haya
+                existing.function = func;
+              }
             }
+          }
 
-            const rec = geneMap[locus];
-
-            // Coordenadas: mantenemos mínimo start y máximo end
-            if (typeof f.start === "number") {
-              if (rec.start == null || f.start < rec.start) rec.start = f.start;
-            }
-            if (typeof f.end === "number") {
-              if (rec.end == null || f.end > rec.end) rec.end = f.end;
-            }
-
-            // Nombre del gen
-            if (f.notes?.gene?.[0] && !rec.gene) {
-              rec.gene = f.notes.gene[0];
-            }
-
-            // Function desde function/product/note (en este orden)
-            const fn =
-              f.notes?.function?.[0] ||
-              f.notes?.product?.[0] ||
-              f.notes?.note?.[0] ||
-              "";
-
-            if (fn && !rec.function) {
-              rec.function = fn;
-            }
-          });
-
-          const genes = Object.values(geneMap);
+          const genes = Array.from(locusMap.values()).sort(
+            (a, b) => a.start - b.start
+          );
 
           out.push({
             acc: g.accession,
@@ -198,52 +197,75 @@ export default function Step4ReportedSites() {
   }, [genomeList]);
 
   // =======================================================
-  // GIVEN A HIT, FIND NEARBY GENES (<=150 nt, con fallback)
+  // GIVEN A HIT, FIND NEARBY GENES (CADENA ±150 nt ENTRE GENES)
   // =======================================================
 
   function findGenesForHit(acc, hitStart, hitEnd) {
     const genome = genomes.find((g) => g.acc === acc);
-    if (!genome || !genome.genes) return [];
+    if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
-    const results = [];
-    let nearest = null;
-    let nearestDist = Infinity;
+    const genes = genome.genes; // ya vienen ordenados por start
 
-    for (const gene of genome.genes) {
-      const dist = Math.min(
-        Math.abs(gene.start - hitStart),
-        Math.abs(gene.end - hitEnd)
-      );
+    // Distancia de un gen al sitio (0 si se solapan)
+    const distToSite = (gene) => {
+      if (hitEnd < gene.start) return gene.start - hitEnd;
+      if (hitStart > gene.end) return hitStart - gene.end;
+      return 0;
+    };
 
-      // Guardamos los que están dentro de 150 nt
-      if (dist <= 150) {
-        results.push({
-          locus: gene.locus || "",
-          gene: gene.gene || "",
-          function: gene.function || "",
-          distance: dist,
+    // 1) gen más cercano al sitio
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    genes.forEach((g, idx) => {
+      const d = distToSite(g);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = idx;
+      }
+    });
+
+    // si el más cercano está a >150 nt, no devolvemos nada
+    if (bestIdx === -1 || bestDist > 150) return [];
+
+    const result = [];
+    const pushUnique = (g) => {
+      if (!result.some((r) => r.locus === g.locus)) {
+        result.push({
+          locus: g.locus || "",
+          gene: g.gene || "",
+          function: g.function || "",
         });
       }
+    };
 
-      // Guardamos el más cercano (por si no hay ninguno <=150)
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = gene;
-      }
+    // 2) añadimos el más cercano
+    pushUnique(genes[bestIdx]);
+
+    // 3) expandimos hacia la izquierda mientras la distancia entre genes vecinos <=150
+    let i = bestIdx - 1;
+    while (i >= 0) {
+      const current = genes[i];
+      const next = genes[i + 1];
+      const gap = next.start - current.end; // si negativo, solapados
+
+      if (gap > 150) break;
+      pushUnique(current);
+      i--;
     }
 
-    // 🔴 CAMBIO 2: si no hay nada en ≤150 nt, usamos el más cercano
-    if (results.length === 0 && nearest) {
-      results.push({
-        locus: nearest.locus || "",
-        gene: nearest.gene || "",
-        function: nearest.function || "",
-        distance: nearestDist,
-      });
+    // 4) expandimos hacia la derecha
+    i = bestIdx + 1;
+    while (i < genes.length) {
+      const prev = genes[i - 1];
+      const current = genes[i];
+      const gap = current.start - prev.end;
+
+      if (gap > 150) break;
+      pushUnique(current);
+      i++;
     }
 
-    results.sort((a, b) => a.distance - b.distance);
-    return results;
+    return result;
   }
 
   // =======================================================
@@ -481,8 +503,8 @@ export default function Step4ReportedSites() {
                         />
                         <div>
                           <div className="font-mono">
-                            {hit.site} {hit.strand}[{hit.start + 1},
-                            {hit.end + 1}] {hit.acc}
+                            {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}]{" "}
+                            {hit.acc}
                           </div>
 
                           {nearby.length > 0 && (
