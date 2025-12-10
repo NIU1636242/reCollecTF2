@@ -121,17 +121,53 @@ export default function Step4ReportedSites() {
           const entry = parsed?.[0];
           const features = entry?.features || [];
 
-          // Nos quedamos con gene y CDS
-          const genes = features
-            .filter((f) => f.type === "gene" || f.type === "CDS")
-            .map((f) => ({
-              start: f.start,
-              end: f.end,
-              locus: f.notes?.locus_tag?.[0] || "",
-              gene: f.notes?.gene?.[0] || "",
-              // Si no hay función, dejamos string vacío (no "-")
-              function: f.notes?.function?.[0] || f.notes?.product?.[0] || "",
-            }));
+          // --- MERGE gene + CDS POR locus_tag, PREFIRIENDO FUNCTION DE CDS ---
+          const locusMap = new Map();
+
+          for (const f of features) {
+            if (f.type !== "gene" && f.type !== "CDS") continue;
+
+            const locus = f.notes?.locus_tag?.[0] || "";
+            if (!locus) continue;
+
+            const geneName = f.notes?.gene?.[0] || "";
+            const func =
+              f.notes?.function?.[0] || f.notes?.product?.[0] || "";
+            const start = f.start;
+            const end = f.end;
+
+            if (!locusMap.has(locus)) {
+              locusMap.set(locus, {
+                locus,
+                gene: geneName,
+                function: func,
+                start,
+                end,
+                hasCDS: f.type === "CDS",
+              });
+            } else {
+              const existing = locusMap.get(locus);
+              existing.start = Math.min(existing.start, start);
+              existing.end = Math.max(existing.end, end);
+
+              if (!existing.gene && geneName) {
+                existing.gene = geneName;
+              }
+
+              // Si esta feature es CDS y trae función, la usamos
+              if (f.type === "CDS" && func) {
+                existing.function = func;
+                existing.hasCDS = true;
+              } else if (!existing.function && func) {
+                // Si aún no teníamos ninguna función, cogemos la que haya
+                existing.function = func;
+              }
+            }
+          }
+
+          const genes = Array.from(locusMap.values()).sort(
+            (a, b) => a.start - b.start
+          );
 
           out.push({
             acc: g.accession,
@@ -161,32 +197,75 @@ export default function Step4ReportedSites() {
   }, [genomeList]);
 
   // =======================================================
-  // GIVEN A HIT, FIND NEARBY GENES (<=150 nt)
+  // GIVEN A HIT, FIND NEARBY GENES (CADENA ±150 nt ENTRE GENES)
   // =======================================================
 
   function findGenesForHit(acc, hitStart, hitEnd) {
     const genome = genomes.find((g) => g.acc === acc);
-    if (!genome || !genome.genes) return [];
+    if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
-    const results = [];
+    const genes = genome.genes; // ya vienen ordenados por start
 
-    for (const gene of genome.genes) {
-      const distStart = Math.abs(gene.start - hitStart);
-      const distEnd = Math.abs(gene.end - hitEnd);
-      const dist = Math.min(distStart, distEnd);
+    // Distancia de un gen al sitio (0 si se solapan)
+    const distToSite = (gene) => {
+      if (hitEnd < gene.start) return gene.start - hitEnd;
+      if (hitStart > gene.end) return hitStart - gene.end;
+      return 0;
+    };
 
-      if (dist <= 150) {
-        results.push({
-          locus: gene.locus || "",
-          gene: gene.gene || "",
-          function: gene.function || "",
-          distance: dist,
+    // 1) gen más cercano al sitio
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    genes.forEach((g, idx) => {
+      const d = distToSite(g);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = idx;
+      }
+    });
+
+    // si el más cercano está a >150 nt, no devolvemos nada
+    if (bestIdx === -1 || bestDist > 150) return [];
+
+    const result = [];
+    const pushUnique = (g) => {
+      if (!result.some((r) => r.locus === g.locus)) {
+        result.push({
+          locus: g.locus || "",
+          gene: g.gene || "",
+          function: g.function || "",
         });
       }
+    };
+
+    // 2) añadimos el más cercano
+    pushUnique(genes[bestIdx]);
+
+    // 3) expandimos hacia la izquierda mientras la distancia entre genes vecinos <=150
+    let i = bestIdx - 1;
+    while (i >= 0) {
+      const current = genes[i];
+      const next = genes[i + 1];
+      const gap = next.start - current.end; // si negativo, solapados
+
+      if (gap > 150) break;
+      pushUnique(current);
+      i--;
     }
 
-    results.sort((a, b) => a.distance - b.distance);
-    return results;
+    // 4) expandimos hacia la derecha
+    i = bestIdx + 1;
+    while (i < genes.length) {
+      const prev = genes[i - 1];
+      const current = genes[i];
+      const gap = current.start - prev.end;
+
+      if (gap > 150) break;
+      pushUnique(current);
+      i++;
+    }
+
+    return result;
   }
 
   // =======================================================
