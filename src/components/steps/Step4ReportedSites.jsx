@@ -125,51 +125,45 @@ export default function Step4ReportedSites() {
           const locusMap = new Map();
 
           for (const f of features) {
-            if (!["gene", "CDS", "tRNA", "rRNA", "misc_RNA"].includes(f.type)) continue;
+            if (f.type !== "gene" && f.type !== "CDS") continue;
 
             const locus = f.notes?.locus_tag?.[0] || "";
             if (!locus) continue;
 
             const geneName = f.notes?.gene?.[0] || "";
-
-            // NORMALIZAR RANGO POR SI start > end
-            const s = Math.min(f.start, f.end);
-            const e = Math.max(f.start, f.end);
-
-            // EXTRAER FUNCTION
-            let func =
-              f.notes?.function?.[0] ||
-              f.notes?.product?.[0] ||
-              f.type || "";  // <-- AÑADIDO
+            const func =
+              f.notes?.function?.[0] || f.notes?.product?.[0] || "";
+            const start = f.start;
+            const end = f.end;
 
             if (!locusMap.has(locus)) {
               locusMap.set(locus, {
                 locus,
                 gene: geneName,
                 function: func,
-                start: s,
-                end: e,
+                start,
+                end,
                 hasCDS: f.type === "CDS",
               });
             } else {
               const existing = locusMap.get(locus);
-
-              existing.start = Math.min(existing.start, s);
-              existing.end = Math.max(existing.end, e);
+              existing.start = Math.min(existing.start, start);
+              existing.end = Math.max(existing.end, end);
 
               if (!existing.gene && geneName) {
                 existing.gene = geneName;
               }
 
+              // Si esta feature es CDS y trae función, la usamos
               if (f.type === "CDS" && func) {
                 existing.function = func;
                 existing.hasCDS = true;
               } else if (!existing.function && func) {
+                // Si aún no teníamos ninguna función, cogemos la que haya
                 existing.function = func;
               }
             }
           }
-
 
           const genes = Array.from(locusMap.values()).sort(
             (a, b) => a.start - b.start
@@ -840,15 +834,17 @@ export default function Step4ReportedSites() {
                     const idx = parseInt(sel.split("-")[1], 10);
                     const h = ex?.[idx];
                     if (h) {
-                      text = `${h.site} ${h.strand}[${h.start + 1},${h.end + 1
-                        }] ${h.acc}`;
+                      text = `${h.site} ${h.strand}[${h.start + 1},${
+                        h.end + 1
+                      }] ${h.acc}`;
                     }
                   } else if (sel && sel.startsWith("fz-")) {
                     const idx = parseInt(sel.split("-")[1], 10);
                     const h = fz?.[idx];
                     if (h) {
-                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${h.start + 1
-                        },${h.end + 1}] ${h.acc}`;
+                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${
+                        h.start + 1
+                      },${h.end + 1}] ${h.acc}`;
                     }
                   } else if (sel === "none-both") {
                     text = site;
