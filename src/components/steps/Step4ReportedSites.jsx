@@ -27,6 +27,49 @@ function buildBars(a, b) {
     .join("");
 }
 
+function parseGenBankGenes(gb) {
+  const lines = gb.split("\n");
+  const genes = [];
+
+  let current = null;
+
+  for (let line of lines) {
+    // Detect gene region: e.g.
+    // gene            2599840..2601858
+    const geneMatch = line.match(/^\s+gene\s+(\d+)\.\.(\d+)/);
+    if (geneMatch) {
+      if (current) genes.push(current);
+
+      current = {
+        start: parseInt(geneMatch[1]),
+        end: parseInt(geneMatch[2]),
+        gene: "",
+        locus: "",
+        function: ""
+      };
+      continue;
+    }
+
+    if (!current) continue;
+
+    // /gene=
+    const g = line.match(/\/gene="(.+?)"/);
+    if (g) current.gene = g[1];
+
+    // /locus_tag=
+    const lt = line.match(/\/locus_tag="(.+?)"/);
+    if (lt) current.locus = lt[1];
+
+    // /function=
+    const fn = line.match(/\/function="(.+?)"/);
+    if (fn) current.function = fn[1];
+  }
+
+  if (current) genes.push(current);
+
+  return genes;
+}
+
 // =======================================================
 // MAIN COMPONENT
 // =======================================================
@@ -77,7 +120,7 @@ export default function Step4ReportedSites() {
   const [bulkTfFunc, setBulkTfFunc] = useState("activator");
 
   // =======================================================
-  // LOAD GENOMES (FASTA ONLY — LIKE BEFORE)
+  // LOAD GENOMES (FASTA AND GENBANK)
   // =======================================================
 
   useEffect(() => {
@@ -88,21 +131,32 @@ export default function Step4ReportedSites() {
 
       for (const g of genomeList) {
         try {
-          const url = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=fasta&retmode=text`;
-          const res = await fetch(url);
-          const txt = await res.text();
+          // 1. FASTA
+          const fastaURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=fasta&retmode=text`;
+          const fastaRes = await fetch(fastaURL);
+          const fastaText = await fastaRes.text();
 
-          const seq = txt
+          const seq = fastaText
             .replace(/>.*/g, "")
             .replace(/[^ATCGatcg]/g, "")
             .toUpperCase();
 
+          // 2. GENBANK FULL
+          const gbURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gb&retmode=text`;
+          const gbRes = await fetch(gbURL);
+          const gbText = await gbRes.text();
+
+          // Parse GenBank features
+          const genes = parseGenBankGenes(gbText);
+
           out.push({
             acc: g.accession,
             sequence: seq,
+            genes
           });
+
         } catch (err) {
-          console.error(err);
+          console.error("Error loading genome:", err);
         }
       }
 
@@ -111,6 +165,7 @@ export default function Step4ReportedSites() {
 
     load();
   }, [genomeList]);
+
 
   // =======================================================
   // SEARCH EXACT MATCHES
@@ -232,6 +287,36 @@ export default function Step4ReportedSites() {
     setShowFuzzy(true);
   }
 
+  function findGeneForHit(acc, hitStart, hitEnd) {
+    const genome = genomes.find(g => g.acc === acc);
+    if (!genome || !genome.genes) return null;
+
+    // 1. Try genes that fully contain the hit
+    for (const gene of genome.genes) {
+      if (gene.start <= hitStart && gene.end >= hitEnd) {
+        return gene;
+      }
+    }
+
+    // 2. Otherwise, return nearest gene
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const gene of genome.genes) {
+      const dist =
+        hitStart < gene.start
+          ? gene.start - hitStart
+          : hitStart - gene.end;
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = gene;
+      }
+    }
+
+    return best;
+  }
+
   // =======================================================
   // RENDER
   // =======================================================
@@ -318,7 +403,21 @@ export default function Step4ReportedSites() {
                           }}
                         />
                         <span className="font-mono">
-                          {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                          {(() => {
+                            const gene = findGeneForHit(hit.acc, hit.start + 1, hit.end + 1);
+                            return (
+                              <div className="font-mono">
+                                {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                                {gene && (
+                                  <div className="ml-4 text-[11px] text-blue-300">
+                                    locus_tag: {gene.locus || "—"} <br />
+                                    gene: {gene.gene || "—"} <br />
+                                    function: {gene.function || "—"}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </span>
                       </label>
                     ) : null
@@ -385,7 +484,21 @@ export default function Step4ReportedSites() {
                             {"\n"}
                             {hit.bars}
                             {"\n"}
-                            {hit.match} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                            {(() => {
+                              const gene = findGeneForHit(hit.acc, hit.start + 1, hit.end + 1);
+                              return (
+                                <div className="font-mono">
+                                  {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                                  {gene && (
+                                    <div className="ml-4 text-[11px] text-blue-300">
+                                      locus_tag: {gene.locus || "—"} <br />
+                                      gene: {gene.gene || "—"} <br />
+                                      function: {gene.function || "—"}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </span>
                         </label>
                       ) : null
@@ -590,9 +703,8 @@ export default function Step4ReportedSites() {
                     const idx = parseInt(sel.split("-")[1]);
                     const h = ex[idx];
                     if (h)
-                      text = `${h.site} ${h.strand}[${h.start + 1},${
-                        h.end + 1
-                      }] ${h.acc}`;
+                      text = `${h.site} ${h.strand}[${h.start + 1},${h.end + 1
+                        }] ${h.acc}`;
                   }
 
                   // fuzzy match
@@ -600,9 +712,8 @@ export default function Step4ReportedSites() {
                     const idx = parseInt(sel.split("-")[1]);
                     const h = fz[idx];
                     if (h)
-                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${
-                        h.start + 1
-                      },${h.end + 1}] ${h.acc}`;
+                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${h.start + 1
+                        },${h.end + 1}] ${h.acc}`;
                   }
 
                   // both no match
