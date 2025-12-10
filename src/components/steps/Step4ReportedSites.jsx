@@ -30,51 +30,56 @@ function buildBars(a, b) {
 function parseGenBankGenes(gb) {
   const lines = gb.split("\n");
   const genes = [];
-
   let current = null;
+  let insideFeature = false;
 
-  const regionRegex = /^\s+gene\s+(complement\()?<?(\d+)>?\.\.<?(\d+)>(\))?/;
+  const regionRegex = /^\s{5}(gene|CDS)\s+(complement\()?<?(\d+)>?\.\.<?(\d+)>(\))?/;
 
   for (let line of lines) {
-
-    // MATCH REGION
+    // MATCH region lines
     const region = line.match(regionRegex);
     if (region) {
+      // Save previous feature
       if (current) genes.push(current);
 
-      const start = parseInt(region[2]);
-      const end = parseInt(region[3]);
-
       current = {
-        start,
-        end,
+        start: parseInt(region[3]),
+        end: parseInt(region[4]),
         gene: "",
         locus: "",
-        function: ""
+        function: "",
+        product: ""
       };
 
+      insideFeature = true;
       continue;
     }
 
-    if (!current) continue;
+    if (!insideFeature || !current) continue;
 
-    // /gene="abc"
-    const g = line.match(/\/gene="(.+?)"/);
-    if (g) current.gene = g[1];
+    // /gene="xxx"
+    let m = line.match(/\/gene="([^"]+)"/);
+    if (m) current.gene = m[1];
 
-    // /locus_tag="b2482"
-    const lt = line.match(/\/locus_tag="(.+?)"/);
-    if (lt) current.locus = lt[1];
+    // /locus_tag="xxx"
+    m = line.match(/\/locus_tag="([^"]+)"/);
+    if (m) current.locus = m[1];
 
-    // /function="blah"
-    const fn = line.match(/\/function="(.+?)"/);
-    if (fn) current.function = fn[1];
+    // /function="xxx"
+    m = line.match(/\/function="([^"]+)"/);
+    if (m) current.function = m[1];
+
+    // /product="xxx"
+    m = line.match(/\/product="([^"]+)"/);
+    if (m) current.product = m[1];
   }
 
+  // push last feature
   if (current) genes.push(current);
 
   return genes;
 }
+
 
 // =======================================================
 // MAIN COMPONENT
@@ -167,6 +172,12 @@ export default function Step4ReportedSites() {
       }
 
       setGenomes(out);
+
+      console.log("GENOMES LOADED:", out.map(g => ({
+        acc: g.acc,
+        genes: g.genes.length,
+        example: g.genes.slice(0, 3)
+      })));
     }
 
     load();
