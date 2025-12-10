@@ -33,34 +33,40 @@ function parseGenBankGenes(gb) {
 
   let current = null;
 
+  const regionRegex = /^\s+gene\s+(complement\()?<?(\d+)>?\.\.<?(\d+)>(\))?/;
+
   for (let line of lines) {
-    // Detect gene region: e.g.
-    // gene            2599840..2601858
-    const geneMatch = line.match(/^\s+gene\s+(\d+)\.\.(\d+)/);
-    if (geneMatch) {
+
+    // MATCH REGION
+    const region = line.match(regionRegex);
+    if (region) {
       if (current) genes.push(current);
 
+      const start = parseInt(region[2]);
+      const end = parseInt(region[3]);
+
       current = {
-        start: parseInt(geneMatch[1]),
-        end: parseInt(geneMatch[2]),
+        start,
+        end,
         gene: "",
         locus: "",
         function: ""
       };
+
       continue;
     }
 
     if (!current) continue;
 
-    // /gene=
+    // /gene="abc"
     const g = line.match(/\/gene="(.+?)"/);
     if (g) current.gene = g[1];
 
-    // /locus_tag=
+    // /locus_tag="b2482"
     const lt = line.match(/\/locus_tag="(.+?)"/);
     if (lt) current.locus = lt[1];
 
-    // /function=
+    // /function="blah"
     const fn = line.match(/\/function="(.+?)"/);
     if (fn) current.function = fn[1];
   }
@@ -141,8 +147,8 @@ export default function Step4ReportedSites() {
             .replace(/[^ATCGatcg]/g, "")
             .toUpperCase();
 
-          // 2. GENBANK FULL
-          const gbURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gb&retmode=text`;
+          // 2. GENBANK
+          const gbURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gbwithparts&retmode=text`;
           const gbRes = await fetch(gbURL);
           const gbText = await gbRes.text();
 
@@ -166,6 +172,7 @@ export default function Step4ReportedSites() {
     load();
   }, [genomeList]);
 
+console.log("GENES LOADED:", genes.length, genes.slice(0,5));
 
   // =======================================================
   // SEARCH EXACT MATCHES
@@ -402,7 +409,7 @@ export default function Step4ReportedSites() {
                             setAccordion((p) => ({ ...p, a4: true }));
                           }}
                         />
-                        <span className="font-mono">
+                        <div className="font-mono">
                           {(() => {
                             const gene = findGeneForHit(hit.acc, hit.start + 1, hit.end + 1);
                             return (
@@ -418,7 +425,7 @@ export default function Step4ReportedSites() {
                               </div>
                             );
                           })()}
-                        </span>
+                        </div>
                       </label>
                     ) : null
                   )}
@@ -479,7 +486,7 @@ export default function Step4ReportedSites() {
                               setAccordion((p) => ({ ...p, a4: true }));
                             }}
                           />
-                          <span className="font-mono whitespace-pre leading-4">
+                          <div className="font-mono whitespace-pre leading-4">
                             {hit.site}
                             {"\n"}
                             {hit.bars}
@@ -499,7 +506,7 @@ export default function Step4ReportedSites() {
                                 </div>
                               );
                             })()}
-                          </span>
+                          </div>
                         </label>
                       ) : null
                     )}
