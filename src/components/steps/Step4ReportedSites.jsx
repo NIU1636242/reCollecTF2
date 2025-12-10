@@ -267,35 +267,35 @@ export default function Step4ReportedSites() {
     setShowFuzzy(true);
   }
 
-  function findGeneForHit(acc, hitStart, hitEnd) {
+  function findGenesForHit(acc, hitStart, hitEnd) {
     const genome = genomes.find(g => g.acc === acc);
-    if (!genome || !genome.genes) return null;
+    if (!genome || !genome.genes) return [];
 
-    // 1. Try genes that fully contain the hit
+    const results = [];
+
     for (const gene of genome.genes) {
-      if (gene.start <= hitStart && gene.end >= hitEnd) {
-        return gene;
+      // distancia real al sitio (inicio–inicio o fin–fin)
+      const distStart = Math.abs(gene.start - hitStart);
+      const distEnd = Math.abs(gene.end - hitEnd);
+      const dist = Math.min(distStart, distEnd);
+
+      // incluir el gen si está dentro del rango de 150 nt
+      if (dist <= 150) {
+        results.push({
+          locus: gene.locus || "—",
+          gene: gene.gene || "—",
+          function: gene.function || "—",
+          distance: dist
+        });
       }
     }
 
-    // 2. Otherwise, return nearest gene
-    let best = null;
-    let bestDist = Infinity;
+    // ordenar por distancia
+    results.sort((a, b) => a.distance - b.distance);
 
-    for (const gene of genome.genes) {
-      const dist =
-        hitStart < gene.start
-          ? gene.start - hitStart
-          : hitStart - gene.end;
-
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = gene;
-      }
-    }
-
-    return best;
+    return results;
   }
+
 
   // =======================================================
   // RENDER
@@ -389,13 +389,29 @@ export default function Step4ReportedSites() {
                             return (
                               <div className="font-mono">
                                 {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
-                                {gene && (
-                                  <div className="ml-4 text-[11px] text-blue-300">
-                                    locus_tag: {gene.locus || "—"} <br />
-                                    gene: {gene.gene || "—"} <br />
-                                    function: {gene.function || "—"}
-                                  </div>
+                                const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
+
+                                {nearby.length > 0 && (
+                                  <table className="ml-4 mt-1 text-[11px] text-blue-300">
+                                    <thead>
+                                      <tr>
+                                        <th className="pr-4 text-left">locus tag</th>
+                                        <th className="pr-4 text-left">gene</th>
+                                        <th className="pr-4 text-left">function</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {nearby.map((g, idx) => (
+                                        <tr key={idx}>
+                                          <td className="pr-4">{g.locus}</td>
+                                          <td className="pr-4">{g.gene}</td>
+                                          <td className="pr-4">{g.function}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
                                 )}
+
                               </div>
                             );
                           })()}
@@ -470,13 +486,29 @@ export default function Step4ReportedSites() {
                               return (
                                 <div className="font-mono">
                                   {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
-                                  {gene && (
-                                    <div className="ml-4 text-[11px] text-blue-300">
-                                      locus_tag: {gene.locus || "—"} <br />
-                                      gene: {gene.gene || "—"} <br />
-                                      function: {gene.function || "—"}
-                                    </div>
+                                  const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
+
+                                  {nearby.length > 0 && (
+                                    <table className="ml-4 mt-1 text-[11px] text-blue-300">
+                                      <thead>
+                                        <tr>
+                                          <th className="pr-4 text-left">locus tag</th>
+                                          <th className="pr-4 text-left">gene</th>
+                                          <th className="pr-4 text-left">function</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {nearby.map((g, idx) => (
+                                          <tr key={idx}>
+                                            <td className="pr-4">{g.locus}</td>
+                                            <td className="pr-4">{g.gene}</td>
+                                            <td className="pr-4">{g.function}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
                                   )}
+
                                 </div>
                               );
                             })()}
