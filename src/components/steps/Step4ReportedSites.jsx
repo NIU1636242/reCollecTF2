@@ -153,7 +153,7 @@ export default function Step4ReportedSites() {
             .toUpperCase();
 
           // 2. GENBANK
-          const gbURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gbwithparts&retmode=text`;
+          const gbURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gb&retmode=text`;
           const gbRes = await fetch(gbURL);
           const gbText = await gbRes.text();
 
