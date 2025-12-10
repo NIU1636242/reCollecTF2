@@ -127,14 +127,21 @@ export default function Step4ReportedSites() {
           for (const f of features) {
             if (f.type !== "gene" && f.type !== "CDS") continue;
 
-            const locus = f.notes?.locus_tag?.[0] || "";
+            const locus =
+              f.notes?.locus_tag?.[0] ||
+              f.notes?.gene?.[0] ||       // fallback
+              `no_tag_${start}`;
+
             if (!locus) continue;
 
             const geneName = f.notes?.gene?.[0] || "";
             const func =
-              f.notes?.function?.[0] || f.notes?.product?.[0] || "";
-            const start = f.start;
-            const end = f.end;
+              f.notes?.function?.[0] ||
+              f.notes?.product?.[0] ||
+              (Array.isArray(f.notes?.note) ? f.notes.note.join("; ") : f.notes?.note?.[0]) ||
+              "";
+            const start = f.start - 1;
+            const end = f.end - 1;
 
             if (!locusMap.has(locus)) {
               locusMap.set(locus, {
@@ -512,7 +519,7 @@ export default function Step4ReportedSites() {
                               <thead>
                                 <tr>
                                   <th className="pr-4 text-left">locus tag</th>
-                                  <th className="pr-4 text-left">gene</th>
+                                  <th className="pr-4 text-left">gene name</th>
                                   <th className="pr-4 text-left">function</th>
                                 </tr>
                               </thead>
@@ -619,7 +626,7 @@ export default function Step4ReportedSites() {
                                     <th className="pr-4 text-left">
                                       locus tag
                                     </th>
-                                    <th className="pr-4 text-left">gene</th>
+                                    <th className="pr-4 text-left">gene name</th>
                                     <th className="pr-4 text-left">
                                       function
                                     </th>
@@ -844,17 +851,15 @@ export default function Step4ReportedSites() {
                     const idx = parseInt(sel.split("-")[1], 10);
                     const h = ex?.[idx];
                     if (h) {
-                      text = `${h.site} ${h.strand}[${h.start + 1},${
-                        h.end + 1
-                      }] ${h.acc}`;
+                      text = `${h.site} ${h.strand}[${h.start + 1},${h.end + 1
+                        }] ${h.acc}`;
                     }
                   } else if (sel && sel.startsWith("fz-")) {
                     const idx = parseInt(sel.split("-")[1], 10);
                     const h = fz?.[idx];
                     if (h) {
-                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${
-                        h.start + 1
-                      },${h.end + 1}] ${h.acc}`;
+                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${h.start + 1
+                        },${h.end + 1}] ${h.acc}`;
                     }
                   } else if (sel === "none-both") {
                     text = site;
