@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useCuration } from "../../context/CurationContext";
+import genbankParser from "genbank-parser";
+
 
 // =======================================================
 // Sequence utilities
@@ -26,60 +28,6 @@ function buildBars(a, b) {
     .map((c, i) => (c === b[i] ? "|" : " "))
     .join("");
 }
-
-function parseGenBankGenes(gb) {
-  const lines = gb.split("\n");
-  const genes = [];
-  let current = null;
-  let insideFeature = false;
-
-  const regionRegex = /^\s{5}(gene|CDS)\s+(complement\()?<?(\d+)>?\.\.<?(\d+)>(\))?/;
-
-  for (let line of lines) {
-    // MATCH region lines
-    const region = line.match(regionRegex);
-    if (region) {
-      // Save previous feature
-      if (current) genes.push(current);
-
-      current = {
-        start: parseInt(region[3]),
-        end: parseInt(region[4]),
-        gene: "",
-        locus: "",
-        function: "",
-        product: ""
-      };
-
-      insideFeature = true;
-      continue;
-    }
-
-    if (!insideFeature || !current) continue;
-
-    // /gene="xxx"
-    let m = line.match(/\/gene="([^"]+)"/);
-    if (m) current.gene = m[1];
-
-    // /locus_tag="xxx"
-    m = line.match(/\/locus_tag="([^"]+)"/);
-    if (m) current.locus = m[1];
-
-    // /function="xxx"
-    m = line.match(/\/function="([^"]+)"/);
-    if (m) current.function = m[1];
-
-    // /product="xxx"
-    m = line.match(/\/product="([^"]+)"/);
-    if (m) current.product = m[1];
-  }
-
-  // push last feature
-  if (current) genes.push(current);
-
-  return genes;
-}
-
 
 // =======================================================
 // MAIN COMPONENT
@@ -153,18 +101,34 @@ export default function Step4ReportedSites() {
             .toUpperCase();
 
           // 2. GENBANK
-          const gbURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gb&retmode=text`;
+          const gbURL = `https://corsproxy.io/?https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gbwithparts&retmode=text`;
           const gbRes = await fetch(gbURL);
           const gbText = await gbRes.text();
 
-          // Parse GenBank features
-          const genes = parseGenBankGenes(gbText);
+          // Parse GenBank using genbank-parser
+          const gbParsed = genbankParser(gbText);
+          const entry = gbParsed[0]; // usually the GenBank file has only one main entry
+          const features = entry?.features || [];
+
+          // extract only real genes or CDS entries
+          const genes = features
+            .filter(f => f.type === "gene" || f.type === "CDS")
+            .map(f => ({
+              start: f.start,
+              end: f.end,
+              locus: f.notes?.locus_tag?.[0] || "",
+              gene: f.notes?.gene?.[0] || "",
+              function: f.notes?.function?.[0] || f.notes?.product?.[0] || ""
+            }));
 
           out.push({
             acc: g.accession,
             sequence: seq,
             genes
           });
+
+          console.log("GENES PARSED FOR", g.accession, genes.slice(0, 5));
+
 
         } catch (err) {
           console.error("Error loading genome:", err);
