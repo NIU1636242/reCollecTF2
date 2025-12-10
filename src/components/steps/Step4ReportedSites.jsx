@@ -172,8 +172,6 @@ export default function Step4ReportedSites() {
     load();
   }, [genomeList]);
 
-console.log("GENES LOADED:", genes.length, genes.slice(0,5));
-
   // =======================================================
   // SEARCH EXACT MATCHES
   // =======================================================
@@ -367,6 +365,7 @@ console.log("GENES LOADED:", genes.length, genes.slice(0,5));
             <textarea
               className="form-control w-full h-40 text-sm"
               value={rawSites}
+              placeholder="AAGATTTCTTT"
               onChange={(e) => setRawSites(e.target.value)}
             />
 
