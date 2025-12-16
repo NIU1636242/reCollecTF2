@@ -7,6 +7,7 @@ import Step2GenomeTF from "./components/steps/Step2GenomeTF";
 import Step3ExperimentalMethods from "./components/steps/Step3ExperimentalMethods";
 import SummaryPanel from "./components/ui/SummaryPanel";
 import Step4ReportedSites from "./components/steps/Step4ReportedSites";
+import Step5SiteAnnotation from "./components/steps/Step5SiteAnnotation";
 
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
           {currentStep === 2 && <Step2GenomeTF />}
           {currentStep === 3 && <Step3ExperimentalMethods />}
           {currentStep === 4 && <Step4ReportedSites />}
+          {currentStep === 5 && <Step5SiteAnnotation/>}
         </div>
 
         {/*Resum (zona dreta*/}

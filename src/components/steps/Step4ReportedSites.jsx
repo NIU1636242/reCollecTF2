@@ -33,14 +33,21 @@ function buildBars(a, b) {
 // =======================================================
 
 export default function Step4ReportedSites() {
-  const { genomeList, techniques } = useCuration();
+  const {
+    genomeList,
+    techniques,
+    goToNextStep,
+    // NUEVO: estado persistente para step4
+    step4State,
+    setStep4State,
+  } = useCuration();
 
   // Accordions open/closed
   const [accordion, setAccordion] = useState({
     a1: true,
     a2: true,
     a3: false,
-    a4: true,
+    a4: true, // lo dejamos aunque ya no se renderiza aquí, para no “cambiar nada” de la lógica
   });
 
   const toggleAcc = (k) =>
@@ -73,14 +80,24 @@ export default function Step4ReportedSites() {
   // Mostrar acordeón de mismatches
   const [showFuzzy, setShowFuzzy] = useState(false);
 
-  // Datos del acordeón 4 (Site annotation)
-  const [annotations, setAnnotations] = useState({});
+  // =======================================================
+  // RESTORE STATE when going back from step5 -> step4
+  // (igual idea que en Step1)
+  // =======================================================
 
-  const TF_TYPES = ["monomer", "dimer", "tetramer", "other", "not specified"];
-  const TF_FUNCS = ["activator", "repressor", "dual", "not specified"];
+  useEffect(() => {
+    if (!step4State) return;
 
-  const [bulkTfType, setBulkTfType] = useState("monomer");
-  const [bulkTfFunc, setBulkTfFunc] = useState("activator");
+    if (step4State.accordion) setAccordion(step4State.accordion);
+    if (step4State.siteType) setSiteType(step4State.siteType);
+    if (typeof step4State.rawSites === "string") setRawSites(step4State.rawSites);
+
+    if (Array.isArray(step4State.sites)) setSites(step4State.sites);
+    if (step4State.exactHits) setExactHits(step4State.exactHits);
+    if (step4State.fuzzyHits) setFuzzyHits(step4State.fuzzyHits);
+    if (step4State.choice) setChoice(step4State.choice);
+    if (typeof step4State.showFuzzy === "boolean") setShowFuzzy(step4State.showFuzzy);
+  }, [step4State]);
 
   // =======================================================
   // LOAD GENOMES (FASTA + GENBANK PARSED WITH genbank-parser)
@@ -174,7 +191,6 @@ export default function Step4ReportedSites() {
             sequence: seq,
             genes,
           });
-
         } catch (err) {
           console.error("Error loading genome:", err);
         }
@@ -379,6 +395,25 @@ export default function Step4ReportedSites() {
   }
 
   // =======================================================
+  // CONFIRM (guardar estado + ir a Step5)
+  // =======================================================
+
+  const handleConfirm = () => {
+    setStep4State({
+      accordion,
+      siteType,
+      rawSites,
+      sites,
+      genomesLoaded: genomes.length > 0, // info opcional
+      exactHits,
+      fuzzyHits,
+      choice,
+      showFuzzy,
+    });
+    goToNextStep();
+  };
+
+  // =======================================================
   // RENDER
   // =======================================================
 
@@ -398,7 +433,7 @@ export default function Step4ReportedSites() {
 
         {accordion.a1 && (
           <div className="space-y-3 text-sm">
-            {/* Site type (como en el pipeline original) */}
+            {/* Site type */}
             <div className="space-y-1">
               <label className="flex items-center gap-2">
                 <input
@@ -480,7 +515,6 @@ export default function Step4ReportedSites() {
                         key={i}
                         className="flex items-start gap-2 text-xs cursor-pointer"
                       >
-                        {/* círculo alineado al texto */}
                         <input
                           type="radio"
                           name={`ex-${site}`}
@@ -655,284 +689,12 @@ export default function Step4ReportedSites() {
       )}
 
       {/* =======================================================
-          ACCORDION 4 — SITE ANNOTATION
+          BOTÓN FINAL — CONFIRM AND CONTINUE
       ======================================================= */}
-      <div className="bg-surface border border-border rounded p-4">
-        <button
-          className="flex justify-between w-full font-semibold mb-3"
-          onClick={() => toggleAcc("a4")}
-        >
-          <span>Site annotation</span>
-          <span>{accordion.a4 ? "▲" : "▼"}</span>
+      <div className="pt-2">
+        <button className="btn" onClick={handleConfirm}>
+          Confirm and continue →
         </button>
-
-        {accordion.a4 && (
-          <div className="text-sm">
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left px-2 py-1">Site</th>
-                  <th className="text-left px-2 py-1">TF-type</th>
-                  <th className="text-left px-2 py-1">TF-function</th>
-                  <th className="text-left px-2 py-1">
-                    Experimental techniques
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {/* FILA BULK */}
-                <tr className="border-b border-border bg-muted/40">
-                  <td className="px-2 py-1">
-                    <button
-                      className="text-blue-400 hover:text-blue-300 underline"
-                      onClick={() => {
-                        const any = sites.some(
-                          (s) => annotations[s]?.selected
-                        );
-                        const a = {};
-                        sites.forEach((s) => {
-                          a[s] = {
-                            ...(annotations[s] || {
-                              tfType: "monomer",
-                              tfFunc: "activator",
-                              useTechniques: false,
-                            }),
-                            selected: !any,
-                          };
-                        });
-                        setAnnotations(a);
-                      }}
-                    >
-                      Select/Unselect all
-                    </button>
-                  </td>
-
-                  <td className="px-2 py-1">
-                    <div className="flex flex-col gap-1">
-                      <select
-                        className="form-control text-xs"
-                        value={bulkTfType}
-                        onChange={(e) => setBulkTfType(e.target.value)}
-                      >
-                        {TF_TYPES.map((t) => (
-                          <option key={t}>{t}</option>
-                        ))}
-                      </select>
-
-                      <button
-                        className="text-blue-400 hover:text-blue-300 underline text-[11px]"
-                        onClick={() => {
-                          const a = {};
-                          sites.forEach((s) => {
-                            const p = annotations[s] || {};
-                            a[s] = {
-                              ...p,
-                              tfType: p.selected ? bulkTfType : p.tfType,
-                            };
-                          });
-                          setAnnotations(a);
-                        }}
-                      >
-                        Apply to selected
-                      </button>
-                    </div>
-                  </td>
-
-                  <td className="px-2 py-1">
-                    <div className="flex flex-col gap-1">
-                      <select
-                        className="form-control text-xs"
-                        value={bulkTfFunc}
-                        onChange={(e) => setBulkTfFunc(e.target.value)}
-                      >
-                        {TF_FUNCS.map((t) => (
-                          <option key={t}>{t}</option>
-                        ))}
-                      </select>
-
-                      <button
-                        className="text-blue-400 hover:text-blue-300 underline text-[11px]"
-                        onClick={() => {
-                          const a = {};
-                          sites.forEach((s) => {
-                            const p = annotations[s] || {};
-                            a[s] = {
-                              ...p,
-                              tfFunc: p.selected ? bulkTfFunc : p.tfFunc,
-                            };
-                          });
-                          setAnnotations(a);
-                        }}
-                      >
-                        Apply to selected
-                      </button>
-                    </div>
-                  </td>
-
-                  <td className="px-2 py-1">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs">
-                        {techniques?.map((t) => t.name).join(", ") || "—"}
-                      </span>
-
-                      {techniques?.length > 0 && (
-                        <div className="flex gap-2 text-[11px]">
-                          <button
-                            className="text-blue-400 hover:text-blue-300 underline"
-                            onClick={() => {
-                              const a = {};
-                              sites.forEach((s) => {
-                                const p = annotations[s] || {};
-                                a[s] = {
-                                  ...p,
-                                  useTechniques:
-                                    p.selected || p.useTechniques,
-                                };
-                              });
-                              setAnnotations(a);
-                            }}
-                          >
-                            Apply to selected
-                          </button>
-
-                          <button
-                            className="text-blue-400 hover:text-blue-300 underline"
-                            onClick={() => {
-                              const a = {};
-                              sites.forEach((s) => {
-                                const p = annotations[s] || {};
-                                a[s] = { ...p, useTechniques: false };
-                              });
-                              setAnnotations(a);
-                            }}
-                          >
-                            Clear all
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-
-                {/* FILAS POR SITIO */}
-                {sites.map((site) => {
-                  const ann = annotations[site] || {
-                    selected: false,
-                    tfType: "monomer",
-                    tfFunc: "activator",
-                    useTechniques: false,
-                  };
-
-                  const sel = choice[site];
-                  const ex = exactHits[site];
-                  const fz = fuzzyHits[site];
-
-                  let text = site;
-
-                  if (sel && sel.startsWith("ex-")) {
-                    const idx = parseInt(sel.split("-")[1], 10);
-                    const h = ex?.[idx];
-                    if (h) {
-                      text = `${h.site} ${h.strand}[${h.start + 1},${
-                        h.end + 1
-                      }] ${h.acc}`;
-                    }
-                  } else if (sel && sel.startsWith("fz-")) {
-                    const idx = parseInt(sel.split("-")[1], 10);
-                    const h = fz?.[idx];
-                    if (h) {
-                      text = `${h.site}\n${h.bars}\n${h.match} ${h.strand}[${
-                        h.start + 1
-                      },${h.end + 1}] ${h.acc}`;
-                    }
-                  } else if (sel === "none-both") {
-                    text = site;
-                  }
-
-                  return (
-                    <tr key={site} className="border-b border-border">
-                      <td className="px-2 py-2 align-top">
-                        <label className="flex gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={ann.selected}
-                            onChange={() =>
-                              setAnnotations((p) => ({
-                                ...p,
-                                [site]: { ...ann, selected: !ann.selected },
-                              }))
-                            }
-                          />
-                          <span className="font-mono text-[11px] whitespace-pre-wrap">
-                            {text}
-                          </span>
-                        </label>
-                      </td>
-
-                      <td className="px-2 py-2 align-top">
-                        <select
-                          className="form-control text-xs"
-                          value={ann.tfType}
-                          onChange={(e) =>
-                            setAnnotations((p) => ({
-                              ...p,
-                              [site]: { ...ann, tfType: e.target.value },
-                            }))
-                          }
-                        >
-                          {TF_TYPES.map((t) => (
-                            <option key={t}>{t}</option>
-                          ))}
-                        </select>
-                      </td>
-
-                      <td className="px-2 py-2 align-top">
-                        <select
-                          className="form-control text-xs"
-                          value={ann.tfFunc}
-                          onChange={(e) =>
-                            setAnnotations((p) => ({
-                              ...p,
-                              [site]: { ...ann, tfFunc: e.target.value },
-                            }))
-                          }
-                        >
-                          {TF_FUNCS.map((t) => (
-                            <option key={t}>{t}</option>
-                          ))}
-                        </select>
-                      </td>
-
-                      <td className="px-2 py-2 align-top">
-                        {techniques?.length > 0 ? (
-                          <label className="inline-flex gap-2 text-xs cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={ann.useTechniques}
-                              onChange={(e) =>
-                                setAnnotations((p) => ({
-                                  ...p,
-                                  [site]: {
-                                    ...ann,
-                                    useTechniques: e.target.checked,
-                                  },
-                                }))
-                              }
-                            />
-                            {techniques.map((t) => t.name).join(", ")}
-                          </label>
-                        ) : (
-                          <span className="text-muted">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );
