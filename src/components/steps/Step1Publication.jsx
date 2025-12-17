@@ -36,9 +36,7 @@ export default function Step1Publication() {
       const isPMID = /^\d+$/.test(q);
       const isDOI = q.includes("/");
 
-      // =========================
       // SEARCH BY PMID
-      // =========================
       if (isPMID) {
         const url = `${BASE}/esummary.fcgi?db=pubmed&id=${q}&retmode=json`;
         const res = await fetch(PROXY + encodeURIComponent(url));
@@ -57,9 +55,7 @@ export default function Step1Publication() {
         };
       }
 
-      // =========================
       // SEARCH BY DOI (PubMed → fallback CrossRef)
-      // =========================
       if (!data && isDOI) {
         // Try PubMed first
         const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(
@@ -114,9 +110,7 @@ export default function Step1Publication() {
         }
       }
 
-      // =========================
       // SEARCH BY TITLE (PubMed)
-      // =========================
       if (!data && !isPMID && !isDOI) {
         const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&retmax=1&term=${encodeURIComponent(
           q
@@ -141,7 +135,10 @@ export default function Step1Publication() {
           authors: (rec.authors || []).map((a) => a.name).join(", "),
           journal: rec.fulljournalname || "Unknown",
           pubdate: rec.pubdate || "No date",
-          doi: rec.elocationid || "No DOI",
+          doi:
+            rec.elocationid?.toLowerCase().startsWith("doi:")
+              ? rec.elocationid.slice(4)
+              : rec.elocationid || "No DOI",
         };
       }
 

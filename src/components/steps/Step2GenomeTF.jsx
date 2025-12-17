@@ -54,10 +54,10 @@ export default function Step2GenomeTF() {
   const [refseqItems, setRefseqItems] = useState([]);
 
   //Checkboxes
-  const [sameStrainGenome, setSameStrainGenome] = useState(false); //checkbox
+  const [sameStrainGenome, setSameStrainGenome] = useState(true); //checkbox
   const [bindingOrganism, setBindingOrganism] = useState(""); //input si no está seleccionado
 
-  const [sameStrainTF, setSameStrainTF] = useState(false);
+  const [sameStrainTF, setSameStrainTF] = useState(true);
   const [reportedTFOrganism, setReportedTFOrganism] = useState("");
 
   const [promoterInfo, setPromoterInfo] = useState(false);
@@ -815,8 +815,7 @@ export default function Step2GenomeTF() {
             onChange={(e) => setSameStrainGenome(e.target.checked)}
           />
           <span>
-            This is the exact same strain as reported in the manuscript for the
-            sites.
+            This is the exact same strain as reported in the manuscript for the sites.
           </span>
         </label>
 
