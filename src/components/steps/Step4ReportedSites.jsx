@@ -32,30 +32,31 @@ export default function Step4ReportedSites() {
     goToNextStep,
   } = useCuration();
 
+  const { genomes, setGenomes } = useCuration();
+
+  // ---------------- STATE ----------------
   const [accordion, setAccordion] = useState({
     a1: true,
     a2: true,
     a3: false,
   });
 
-  const toggleAcc = (k) =>
-    setAccordion((p) => ({ ...p, [k]: !p[k] }));
-
   const [siteType, setSiteType] = useState("variable");
   const [rawSites, setRawSites] = useState("");
   const [sites, setSites] = useState([]);
-  const { genomes, setGenomes } = useCuration();
+
   const [exactHits, setExactHits] = useState({});
   const [fuzzyHits, setFuzzyHits] = useState({});
   const [choice, setChoice] = useState({});
   const [showFuzzy, setShowFuzzy] = useState(false);
 
-  // 👉 NUEVO: site activo
+  // NUEVO: site activo
   const [activeSite, setActiveSite] = useState(null);
 
-  // ============================
-  // RESTORE STATE
-  // ============================
+  const toggleAcc = (k) =>
+    setAccordion((p) => ({ ...p, [k]: !p[k] }));
+
+  // ---------------- RESTORE ----------------
   useEffect(() => {
     if (!step4Data) return;
 
@@ -69,9 +70,7 @@ export default function Step4ReportedSites() {
     setActiveSite(step4Data.activeSite || null);
   }, []);
 
-  // ============================
-  // LOAD GENOMES
-  // ============================
+  // ---------------- LOAD GENOMES ----------------
   useEffect(() => {
     if (!genomeList?.length) return;
 
@@ -84,8 +83,8 @@ export default function Step4ReportedSites() {
           encodeURIComponent(
             `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=fasta&retmode=text`
           );
-        const fastaText = await (await fetch(fastaURL)).text();
 
+        const fastaText = await (await fetch(fastaURL)).text();
         const seq = fastaText
           .replace(/>.*/g, "")
           .replace(/[^ATCG]/gi, "")
@@ -96,8 +95,8 @@ export default function Step4ReportedSites() {
           encodeURIComponent(
             `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gbwithparts&retmode=text`
           );
-        const gbText = await (await fetch(gbURL)).text();
 
+        const gbText = await (await fetch(gbURL)).text();
         const parsed = genbankParser(gbText);
         const features = parsed?.[0]?.features || [];
 
@@ -108,18 +107,16 @@ export default function Step4ReportedSites() {
           const locus = f.notes?.locus_tag?.[0];
           if (!locus) continue;
 
-          if (!locusMap.has(locus)) {
-            locusMap.set(locus, {
-              locus,
-              gene: f.notes?.gene?.[0] || "",
-              function:
-                f.notes?.function?.[0] ||
-                f.notes?.product?.[0] ||
-                "",
-              start: f.start,
-              end: f.end,
-            });
-          }
+          locusMap.set(locus, {
+            locus,
+            gene: f.notes?.gene?.[0] || "",
+            function:
+              f.notes?.function?.[0] ||
+              f.notes?.product?.[0] ||
+              "",
+            start: f.start,
+            end: f.end,
+          });
         }
 
         out.push({
@@ -135,49 +132,63 @@ export default function Step4ReportedSites() {
     load();
   }, [genomeList]);
 
+  // ---------------- HELPERS ----------------
   function findGenesForHit(acc, hitStart, hitEnd) {
     const genome = genomes.find((g) => g.acc === acc);
     if (!genome) return [];
 
     const genes = genome.genes;
+
+    const dist = (g) =>
+      hitEnd < g.start
+        ? g.start - hitEnd
+        : hitStart > g.end
+        ? hitStart - g.end
+        : 0;
+
     let bestIdx = -1;
-    let bestDist = Infinity;
+    let best = Infinity;
 
     genes.forEach((g, i) => {
-      const d =
-        hitEnd < g.start
-          ? g.start - hitEnd
-          : hitStart > g.end
-          ? hitStart - g.end
-          : 0;
-      if (d < bestDist) {
-        bestDist = d;
+      const d = dist(g);
+      if (d < best) {
+        best = d;
         bestIdx = i;
       }
     });
 
-    if (bestIdx === -1 || bestDist > 150) return [];
+    if (bestIdx === -1 || best > 150) return [];
 
     const res = [];
-    const add = (g) =>
+    const push = (g) =>
       !res.some((r) => r.locus === g.locus) &&
-      res.push({ locus: g.locus, gene: g.gene, function: g.function });
+      res.push({
+        locus: g.locus,
+        gene: g.gene,
+        function: g.function,
+      });
 
-    add(genes[bestIdx]);
+    push(genes[bestIdx]);
 
     for (let i = bestIdx - 1; i >= 0; i--) {
       if (genes[i + 1].start - genes[i].end > 150) break;
-      add(genes[i]);
+      push(genes[i]);
     }
 
     for (let i = bestIdx + 1; i < genes.length; i++) {
       if (genes[i].start - genes[i - 1].end > 150) break;
-      add(genes[i]);
+      push(genes[i]);
     }
 
     return res;
   }
 
+  function isSiteCompleted(site) {
+    const c = choice?.[site];
+    return typeof c === "string" && (c.startsWith("ex-") || c.startsWith("fz-"));
+  }
+
+  // ---------------- SEARCH EXACT ----------------
   function findExact() {
     const arr = rawSites
       .split(/\r?\n/)
@@ -185,9 +196,11 @@ export default function Step4ReportedSites() {
       .filter(Boolean);
 
     setSites(arr);
-    setActiveSite(arr[0] || null);
+    setActiveSite(null);
 
     const all = {};
+    const ch = {};
+
     arr.forEach((site) => {
       const rc = revComp(site);
       const L = site.length;
@@ -198,6 +211,7 @@ export default function Step4ReportedSites() {
         while (i !== -1) {
           all[site].push({
             site,
+            match: site,
             start: i,
             end: i + L - 1,
             acc: g.acc,
@@ -210,6 +224,7 @@ export default function Step4ReportedSites() {
         while (j !== -1) {
           all[site].push({
             site,
+            match: rc,
             start: j,
             end: j + L - 1,
             acc: g.acc,
@@ -220,14 +235,16 @@ export default function Step4ReportedSites() {
       });
 
       if (!all[site].length) all[site] = ["none"];
+      ch[site] = null;
     });
 
     setExactHits(all);
-    setChoice(Object.fromEntries(arr.map((s) => [s, null])));
+    setChoice(ch);
     setFuzzyHits({});
     setShowFuzzy(false);
   }
 
+  // ---------------- SEARCH FUZZY ----------------
   function findFuzzy(site) {
     const L = site.length;
     const rc = revComp(site);
@@ -237,8 +254,7 @@ export default function Step4ReportedSites() {
       for (let i = 0; i <= g.sequence.length - L; i++) {
         const sub = g.sequence.slice(i, i + L);
 
-        const mmF = mismatches(sub, site);
-        if (mmF > 0 && mmF <= 2)
+        if (mismatches(sub, site) > 0 && mismatches(sub, site) <= 2)
           found.push({
             site,
             match: sub,
@@ -249,8 +265,7 @@ export default function Step4ReportedSites() {
             strand: "+",
           });
 
-        const mmR = mismatches(sub, rc);
-        if (mmR > 0 && mmR <= 2)
+        if (mismatches(sub, rc) > 0 && mismatches(sub, rc) <= 2)
           found.push({
             site,
             match: sub,
@@ -265,9 +280,11 @@ export default function Step4ReportedSites() {
 
     setFuzzyHits((p) => ({ ...p, [site]: found.length ? found : ["none"] }));
     setShowFuzzy(true);
-    setAccordion((p) => ({ ...p, a3: true }));
   }
 
+  const visibleSites = activeSite ? [activeSite] : sites;
+
+  // ---------------- CONFIRM ----------------
   function handleConfirm() {
     setStep4Data({
       siteType,
@@ -282,84 +299,48 @@ export default function Step4ReportedSites() {
     goToNextStep();
   }
 
+  // ---------------- RENDER ----------------
   return (
     <div className="space-y-8">
-      {/* ACCORDION 1 — INPUT */}
-            <div className="bg-surface border border-border rounded p-4">
-                <button
-                    className="flex justify-between w-full font-semibold mb-3"
-                    onClick={() => toggleAcc("a1")}
-                >
-                    <span>Reported sites</span>
-                    <span>{accordion.a1 ? "▲" : "▼"}</span>
-                </button>
 
-                {accordion.a1 && (
-                    <div className="space-y-3 text-sm">
-                        {/* Site type (como en el pipeline original) */}
-                        <div className="space-y-1">
-                            <label className="flex items-center gap-2">
-                                <input
-                                    type="radio"
-                                    checked={siteType === "motif"}
-                                    onChange={() => setSiteType("motif")}
-                                />
-                                motif-associated (new motif)
-                            </label>
+      {/* ACCORDION 1 */}
+      <div className="bg-surface border border-border rounded p-4">
+        <button onClick={() => toggleAcc("a1")} className="flex justify-between w-full font-semibold">
+          <span>Reported sites</span>
+          <span>{accordion.a1 ? "▲" : "▼"}</span>
+        </button>
 
-                            <label className="flex items-center gap-2">
-                                <input
-                                    type="radio"
-                                    checked={siteType === "variable"}
-                                    onChange={() => setSiteType("variable")}
-                                />
-                                variable motif associated
-                            </label>
+        {accordion.a1 && (
+          <div className="space-y-3 text-sm mt-3">
+            <label><input type="radio" checked={siteType === "motif"} onChange={() => setSiteType("motif")} /> motif-associated (new motif)</label>
+            <label><input type="radio" checked={siteType === "variable"} onChange={() => setSiteType("variable")} /> variable motif associated</label>
+            <label><input type="radio" checked={siteType === "nonmotif"} onChange={() => setSiteType("nonmotif")} /> non-motif associated</label>
 
-                            <label className="flex items-center gap-2">
-                                <input
-                                    type="radio"
-                                    checked={siteType === "nonmotif"}
-                                    onChange={() => setSiteType("nonmotif")}
-                                />
-                                non-motif associated
-                            </label>
-                        </div>
-
-                        <textarea
-                            className="form-control w-full h-40 text-sm"
-                            value={rawSites}
-                            placeholder="AAGATTTCTTT"
-                            onChange={(e) => setRawSites(e.target.value)}
-                        />
-
-                        <button className="btn" onClick={findExact}>
-                            Save
-                        </button>
-                    </div>
-                )}
-            </div>
+            <textarea className="form-control w-full h-32" value={rawSites} onChange={(e) => setRawSites(e.target.value)} />
+            <button className="btn" onClick={findExact}>Save</button>
+          </div>
+        )}
+      </div>
 
       {/* SITE SELECTOR */}
       {sites.length > 0 && (
-        <div className="bg-surface border border-border rounded p-3">
-          <div className="font-semibold text-sm mb-2">Binding sites</div>
-          <div className="divide-y divide-border">
-            {sites.map((s) => (
-              <button
-                key={s}
-                onClick={() => setActiveSite(s)}
-                className={`w-full text-left px-3 py-2 text-sm
-                  ${s === activeSite ? "bg-muted" : "hover:bg-muted/50"}
-                  ${choice[s] !== null ? "text-green-400 font-semibold" : ""}`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+        <div className="bg-surface border border-border rounded p-2">
+          {sites.map((s) => (
+            <div
+              key={s}
+              onClick={() => setActiveSite(s)}
+              className={`cursor-pointer p-2 border-b last:border-0
+                ${activeSite === s ? "bg-border" : ""}
+                ${isSiteCompleted(s) ? "text-green-400 font-semibold" : ""}
+              `}
+            >
+              {s}
+            </div>
+          ))}
         </div>
       )}
 
+      
             {/* ACCORDION 2 — EXACT MATCHES */}
             <div className="bg-surface border border-border rounded p-4">
                 <button
@@ -460,7 +441,7 @@ export default function Step4ReportedSites() {
                     </div>
                 )}
             </div>
-       {/* ACCORDION 3 — MISMATCHES */}
+            {/* ACCORDION 3 — MISMATCHES */}
             {showFuzzy && (
                 <div className="bg-surface border border-border rounded p-4">
                     <button
@@ -566,6 +547,7 @@ export default function Step4ReportedSites() {
                     )}
                 </div>
             )}
+
       <button className="btn mt-6" onClick={handleConfirm}>
         Confirm and continue →
       </button>
