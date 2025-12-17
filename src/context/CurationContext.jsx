@@ -19,8 +19,8 @@ export function CurationProvider({ children }) {
   const [uniprotList, setUniprotList] = useState([]);
   const [refseqList, setRefseqList] = useState([]);
   const [strainData, setStrainData] = useState({
-    sameStrainGenome: false, //checkboxes
-    sameStrainTF: false,
+    sameStrainGenome: true, //checkboxes
+    sameStrainTF: true,
     organismTFBindingSites: "",
     organismReportedTF: "",
     promoterInfo: false,

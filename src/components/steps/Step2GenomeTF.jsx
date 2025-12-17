@@ -25,7 +25,7 @@ export default function Step2GenomeTF() {
   const [searchName, setSearchName] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [tfRow, setTfRow] = useState(null); //nombre TF completo
-
+  
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTFName, setNewTFName] = useState("");
   const [tfDesc, setTfDesc] = useState("");
@@ -54,10 +54,10 @@ export default function Step2GenomeTF() {
   const [refseqItems, setRefseqItems] = useState([]);
 
   //Checkboxes
-  const [sameStrainGenome, setSameStrainGenome] = useState(true); //checkbox
+  const [sameStrainGenome, setSameStrainGenome] = useState(false); //checkbox
   const [bindingOrganism, setBindingOrganism] = useState(""); //input si no está seleccionado
 
-  const [sameStrainTF, setSameStrainTF] = useState(true);
+  const [sameStrainTF, setSameStrainTF] = useState(false);
   const [reportedTFOrganism, setReportedTFOrganism] = useState("");
 
   const [promoterInfo, setPromoterInfo] = useState(false);
@@ -84,33 +84,15 @@ export default function Step2GenomeTF() {
     if (refseqList?.length) setRefseqItems(refseqList);
 
     if (strainData) {
-      // Checkbox: same strain genome
-      if (typeof strainData.sameStrainGenome === "boolean") {
-        setSameStrainGenome(strainData.sameStrainGenome);
-      }
-
-      // Input: organism where TF binding sites are reported
+      setSameStrainGenome(strainData.sameStrainGenome || false);
       setBindingOrganism(strainData.organismTFBindingSites || "");
 
-      // Checkbox: same strain TF
-      if (typeof strainData.sameStrainTF === "boolean") {
-        setSameStrainTF(strainData.sameStrainTF);
-      }
-
-      // Input: organism of origin for reported TF
+      setSameStrainTF(strainData.sameStrainTF || false);
       setReportedTFOrganism(strainData.organismReportedTF || "");
 
-      // Checkbox: promoter information
-      if (typeof strainData.promoterInfo === "boolean") {
-        setPromoterInfo(strainData.promoterInfo);
-      }
-
-      // Checkbox: expression information
-      if (typeof strainData.expressionInfo === "boolean") {
-        setExpressionInfo(strainData.expressionInfo);
-      }
+      setPromoterInfo(strainData.promoterInfo || false);
+      setExpressionInfo(strainData.expressionInfo || false);
     }
-
   }, []);
 
   //Load families de la base de dades
@@ -447,7 +429,7 @@ export default function Step2GenomeTF() {
     setGenomeInput("");
     setGenomeSuggestions([]);
   }
-
+  
   //Llegir input. Si està a la DB ho mostra, si no, executa la funció de la API
   async function handleUniprotEnter() {
     const acc = uniprotInput.trim();
@@ -758,7 +740,8 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Genome NCBI accession number</h3>
         <p className="text-sm text-muted">
-          Paste the NCBI GenBank genome accession for the closest species or strain (e.g. NC_000913.2).
+          Paste the NCBI GenBank genome accession for the closest species or
+          strain (e.g. NC_000913.2).
         </p>
 
         <input
@@ -832,7 +815,8 @@ export default function Step2GenomeTF() {
             onChange={(e) => setSameStrainGenome(e.target.checked)}
           />
           <span>
-            This is the exact same strain as reported in the manuscript for the sites.
+            This is the exact same strain as reported in the manuscript for the
+            sites.
           </span>
         </label>
 
