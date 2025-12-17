@@ -11,14 +11,14 @@ export function useCuration() {
 
 export function CurationProvider({ children }) {
   const [currentStep, setCurrentStep] = useState(1); //currentStep per a guardar el step en el que estem, al principi el 1
-  
+
   const [publication, setPublication] = useState(null); //guardem la publication del step1, al principi null
 
   const [tf, setTf] = useState(null); //TF step2
   const [genomeList, setGenomeList] = useState([]); // llistes accession numbers
   const [uniprotList, setUniprotList] = useState([]);
-  const [refseqList, setRefseqList] = useState([]); 
-  const [strainData, setStrainData] = useState({ 
+  const [refseqList, setRefseqList] = useState([]);
+  const [strainData, setStrainData] = useState({
     sameStrainGenome: false, //checkboxes
     sameStrainTF: false,
     organismTFBindingSites: "",
@@ -29,11 +29,12 @@ export function CurationProvider({ children }) {
 
   const [techniques, setTechniques] = useState([]); //Tècniques del Step3
 
-  const [reportedSitesData, setReportedSitesData] = useState(null);
+  // STEP 4 – Reported sites
+  const [step4Data, setStep4Data] = useState(null);
 
-  const [siteAnnotations, setSiteAnnotations] = useState({});
-  const [bulkTfType, setBulkTfType] = useState("monomer");
-  const [bulkTfFunc, setBulkTfFunc] = useState("activator");
+  // STEP 5 – Site annotation
+  const [step5Data, setStep5Data] = useState(null);
+
 
   const goToNextStep = () => setCurrentStep((s) => s + 1); //anar al següent pas
   const goToStep = (n) => setCurrentStep(n); //anar a qualsevol pas
@@ -45,7 +46,7 @@ export function CurationProvider({ children }) {
         goToStep,
         goToNextStep,
         publication,
-        setPublication, 
+        setPublication,
         tf,
         setTf,
         techniques,
@@ -58,14 +59,11 @@ export function CurationProvider({ children }) {
         setRefseqList,
         strainData,
         setStrainData,
-        reportedSitesData,
-        setReportedSitesData,
-        siteAnnotations,
-        setSiteAnnotations,
-        bulkTfType,
-        setBulkTfType,
-        bulkTfFunc,
-        setBulkTfFunc,
+        step4Data,
+        setStep4Data,
+        step5Data,
+        setStep5Data,
+
       }}
     >
       {children}
