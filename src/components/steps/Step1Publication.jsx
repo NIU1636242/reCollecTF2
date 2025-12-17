@@ -16,10 +16,11 @@ export default function Step1Publication() {
     if (publication) {
       setArticle(publication);
       if (publication.pmid) setQuery(publication.pmid);
+      else if (publication.doi) setQuery(publication.doi);
     }
   }, [publication]);
 
-  //Main search function (PMID o DOI SOLO)
+  //Main search function (PMID, DOI o TITLE)
   async function handleSearch(e) {
     e.preventDefault();
     setError("");
@@ -35,65 +36,123 @@ export default function Step1Publication() {
       const isPMID = /^\d+$/.test(q);
       const isDOI = q.includes("/");
 
-      // Si no parece ni PMID ni DOI → error
-      if (!isPMID && !isDOI) {
-        throw new Error(
-          "Please enter a valid PMID or DOI. For title searches use the PubMed link below."
-        );
-      }
-
-      //Search by PMID
+      // =========================
+      // SEARCH BY PMID
+      // =========================
       if (isPMID) {
         const url = `${BASE}/esummary.fcgi?db=pubmed&id=${q}&retmode=json`;
         const res = await fetch(PROXY + encodeURIComponent(url));
         const json = await res.json();
         const rec = json.result?.[q];
 
-        if (rec) {
+        if (!rec) throw new Error("PMID not found.");
+
+        data = {
+          pmid: q,
+          title: rec.title || "Title not available",
+          authors: (rec.authors || []).map((a) => a.name).join(", "),
+          journal: rec.fulljournalname || "Unknown",
+          pubdate: rec.pubdate || "No date",
+          doi: rec.elocationid || "No DOI",
+        };
+      }
+
+      // =========================
+      // SEARCH BY DOI (PubMed → fallback CrossRef)
+      // =========================
+      if (!data && isDOI) {
+        // Try PubMed first
+        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(
+          q
+        )}[doi]`;
+
+        const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
+        const js1 = await r1.json();
+        const pmid = js1.esearchresult?.idlist?.[0];
+
+        if (pmid) {
+          const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
+          const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
+          const js2 = await r2.json();
+          const rec = js2.result?.[pmid];
+
+          if (rec) {
+            data = {
+              pmid,
+              title: rec.title || "Title not available",
+              authors: (rec.authors || []).map((a) => a.name).join(", "),
+              journal: rec.fulljournalname || "Unknown",
+              pubdate: rec.pubdate || "No date",
+              doi: rec.elocationid || q,
+            };
+          }
+        }
+
+        // Fallback: CrossRef
+        if (!data) {
+          const crUrl = `https://api.crossref.org/works/${encodeURIComponent(
+            q
+          )}`;
+          const crRes = await fetch(PROXY + encodeURIComponent(crUrl));
+          const crJson = await crRes.json();
+          const m = crJson.message;
+
+          if (!m) throw new Error("DOI not found in CrossRef.");
+
           data = {
-            pmid: q,
-            title: rec.title || "Title not available",
-            authors: (rec.authors || []).map((a) => a.name).join(", "),
-            journal: rec.fulljournalname || "Unknown",
-            pubdate: rec.pubdate || "No date",
-            doi: rec.elocationid || "No DOI",
+            pmid: null,
+            title: m.title?.[0] || "Title not available",
+            authors: (m.author || [])
+              .map((a) => `${a.family || ""} ${a.given || ""}`)
+              .join(", "),
+            journal:
+              m["container-title"]?.[0] || "Unknown journal",
+            pubdate:
+              m.issued?.["date-parts"]?.[0]?.join("-") || "No date",
+            doi: q,
           };
         }
       }
 
-      //Search by DOI directamente en PubMed (ESearch [doi] → ESummary)
-      if (isDOI) {
-        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(
+      // =========================
+      // SEARCH BY TITLE (PubMed)
+      // =========================
+      if (!data && !isPMID && !isDOI) {
+        const esearchUrl = `${BASE}/esearch.fcgi?db=pubmed&retmode=json&retmax=1&term=${encodeURIComponent(
           q
-        )}[doi]`;
+        )}[title]`;
+
         const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
         const js1 = await r1.json();
-
         const pmid = js1.esearchresult?.idlist?.[0];
-        if (!pmid) throw new Error("No PubMed matches found for this DOI.");
+
+        if (!pmid) {
+          throw new Error("No PubMed articles found with this title.");
+        }
 
         const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
         const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
         const js2 = await r2.json();
-
         const rec = js2.result?.[pmid];
-        if (rec) {
-          data = {
-            pmid,
-            title: rec.title || "Title not available",
-            authors: (rec.authors || []).map((a) => a.name).join(", "),
-            journal: rec.fulljournalname || "Unknown",
-            pubdate: rec.pubdate || "No date",
-            doi: rec.elocationid || q || "No DOI",
-          };
-        }
+
+        data = {
+          pmid,
+          title: rec.title || "Title not available",
+          authors: (rec.authors || []).map((a) => a.name).join(", "),
+          journal: rec.fulljournalname || "Unknown",
+          pubdate: rec.pubdate || "No date",
+          doi: rec.elocationid || "No DOI",
+        };
       }
 
       if (!data) throw new Error("No results found.");
+
       setArticle(data);
     } catch (e) {
       console.error(e);
-      setError("Error searching the article, please introduce a valid PubMedID or DOI.");
+      setError(
+        "Error searching the article. Please enter a PMID, DOI or article title."
+      );
     } finally {
       setLoading(false);
     }
@@ -113,7 +172,7 @@ export default function Step1Publication() {
       <div className="flex gap-2">
         <input
           className="form-control"
-          placeholder="PMID or DOI"
+          placeholder="PMID, DOI or article title"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -123,7 +182,7 @@ export default function Step1Publication() {
       </div>
 
       <a
-        href="https://pubmed.ncbi.nlm.nih.gov/" //enllaç a pubmed
+        href="https://pubmed.ncbi.nlm.nih.gov/"
         target="_blank"
         rel="noopener noreferrer"
         className="inline-block text-sm text-blue-400 hover:text-blue-300 underline mt-1"
@@ -146,7 +205,7 @@ export default function Step1Publication() {
             <strong>Date:</strong> {article.pubdate}
           </p>
           <p>
-            <strong>PMID:</strong> {article.pmid}
+            <strong>PMID:</strong> {article.pmid || "—"}
           </p>
           <p>
             <strong>DOI:</strong> {article.doi}
@@ -159,6 +218,6 @@ export default function Step1Publication() {
           </div>
         </div>
       )}
-    </div> 
+    </div>
   );
 }
