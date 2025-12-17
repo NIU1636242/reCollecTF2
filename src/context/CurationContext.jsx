@@ -35,6 +35,8 @@ export function CurationProvider({ children }) {
   // STEP 5 – Site annotation
   const [step5Data, setStep5Data] = useState(null);
 
+  const [step6Data, setStep6Data] = useState(null);
+
 
   const goToNextStep = () => setCurrentStep((s) => s + 1); //anar al següent pas
   const goToStep = (n) => setCurrentStep(n); //anar a qualsevol pas
@@ -63,7 +65,8 @@ export function CurationProvider({ children }) {
         setStep4Data,
         step5Data,
         setStep5Data,
-
+        step6Data,
+        setStep6Data,
       }}
     >
       {children}
