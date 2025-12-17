@@ -2,11 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useCuration } from "../../context/CurationContext";
 import genbankParser from "genbank-parser";
 
-// =======================================================
-// Small sequence helpers
-// =======================================================
-
-function revComp(seq) {
+function revComp(seq) { //Obtenir cadena complementària 
   const map = { A: "T", T: "A", C: "G", G: "C" };
   return seq
     .split("")
@@ -15,31 +11,26 @@ function revComp(seq) {
     .join("");
 }
 
-function mismatches(a, b) {
+function mismatches(a, b) { //1 o 2 mismatches
   let n = 0;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
   return n;
 }
 
-function buildBars(a, b) {
+function buildBars(a, b) { //Genera |
   return a
     .split("")
     .map((c, i) => (c === b[i] ? "|" : " "))
     .join("");
 }
 
-// =======================================================
 // MAIN COMPONENT
-// =======================================================
-
 export default function Step4ReportedSites() {
   const {
     genomeList,
-    techniques,
+    reportedSitesData,
+    setReportedSitesData,
     goToNextStep,
-    // NUEVO: estado persistente para step4
-    step4State,
-    setStep4State,
   } = useCuration();
 
   // Accordions open/closed
@@ -47,62 +38,36 @@ export default function Step4ReportedSites() {
     a1: true,
     a2: true,
     a3: false,
-    a4: true, // lo dejamos aunque ya no se renderiza aquí, para no “cambiar nada” de la lógica
   });
 
-  const toggleAcc = (k) =>
+  const toggleAcc = (k) => //abrir o cerrar acordeones
     setAccordion((p) => ({
       ...p,
       [k]: !p[k],
     }));
 
-  // User input
-  const [siteType, setSiteType] = useState("variable");
-  const [rawSites, setRawSites] = useState("");
-
-  // List of cleaned sequences
-  const [sites, setSites] = useState([]);
-
-  // Genomes: { acc, sequence, genes[] }
-  const [genomes, setGenomes] = useState([]);
-
-  // Matches
+  const [siteType, setSiteType] = useState("variable"); //tipus de site
+  const [rawSites, setRawSites] = useState(""); //text introduït
+  const [sites, setSites] = useState([]); //llista de secuencies
+  const [genomes, setGenomes] = useState([]); //info del genoma
   const [exactHits, setExactHits] = useState({});
   const [fuzzyHits, setFuzzyHits] = useState({});
+  const [choice, setChoice] = useState({}); //guarda hit escollit per l'usuari
+  const [showFuzzy, setShowFuzzy] = useState(false);   //Mostrar acordeón de mismatches
 
-  // User choice por sitio:
-  //  - "ex-0", "ex-1"...
-  //  - "fz-0", "fz-1"...
-  //  - "none" (no exact, se buscan mismatches)
-  //  - "none-both" (ni exact ni mismatches)
-  const [choice, setChoice] = useState({});
-
-  // Mostrar acordeón de mismatches
-  const [showFuzzy, setShowFuzzy] = useState(false);
-
-  // =======================================================
-  // RESTORE STATE when going back from step5 -> step4
-  // (igual idea que en Step1)
-  // =======================================================
-
+  // ===== RESTORE WHEN GOING BACK FROM STEP5 =====
   useEffect(() => {
-    if (!step4State) return;
+    if (!reportedSitesData) return;
 
-    if (step4State.accordion) setAccordion(step4State.accordion);
-    if (step4State.siteType) setSiteType(step4State.siteType);
-    if (typeof step4State.rawSites === "string") setRawSites(step4State.rawSites);
+    setSiteType(reportedSitesData.siteType);
+    setRawSites(reportedSitesData.rawSites);
+    setSites(reportedSitesData.sites || []);
+    setExactHits(reportedSitesData.exactHits || {});
+    setFuzzyHits(reportedSitesData.fuzzyHits || {});
+    setChoice(reportedSitesData.choice || {});
+  }, [reportedSitesData]);
 
-    if (Array.isArray(step4State.sites)) setSites(step4State.sites);
-    if (step4State.exactHits) setExactHits(step4State.exactHits);
-    if (step4State.fuzzyHits) setFuzzyHits(step4State.fuzzyHits);
-    if (step4State.choice) setChoice(step4State.choice);
-    if (typeof step4State.showFuzzy === "boolean") setShowFuzzy(step4State.showFuzzy);
-  }, [step4State]);
-
-  // =======================================================
   // LOAD GENOMES (FASTA + GENBANK PARSED WITH genbank-parser)
-  // =======================================================
-
   useEffect(() => {
     if (!genomeList || genomeList.length === 0) return;
 
@@ -112,11 +77,7 @@ export default function Step4ReportedSites() {
       for (const g of genomeList) {
         try {
           // FASTA
-          const fastaURL =
-            "https://corsproxy.io/?" +
-            encodeURIComponent(
-              `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=fasta&retmode=text`
-            );
+          const fastaURL = "https://corsproxy.io/?" + encodeURIComponent(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=fasta&retmode=text`);
           const fastaRes = await fetch(fastaURL);
           const fastaText = await fastaRes.text();
 
@@ -126,30 +87,24 @@ export default function Step4ReportedSites() {
             .toUpperCase();
 
           // GENBANK
-          const gbURL =
-            "https://corsproxy.io/?" +
-            encodeURIComponent(
-              `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gbwithparts&retmode=text`
-            );
+          const gbURL = "https://corsproxy.io/?" + encodeURIComponent(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=${g.accession}&rettype=gbwithparts&retmode=text`);
           const gbRes = await fetch(gbURL);
           const gbText = await gbRes.text();
 
-          const parsed = genbankParser(gbText);
+          const parsed = genbankParser(gbText); //parse genBank
           const entry = parsed?.[0];
           const features = entry?.features || [];
 
-          // --- MERGE gene + CDS POR locus_tag, PREFIRIENDO FUNCTION DE CDS ---
           const locusMap = new Map();
 
           for (const f of features) {
             if (f.type !== "gene" && f.type !== "CDS") continue;
 
-            const locus = f.notes?.locus_tag?.[0] || "";
+            const locus = f.notes?.locus_tag?.[0] || ""; //obtenir locus
             if (!locus) continue;
 
-            const geneName = f.notes?.gene?.[0] || "";
-            const func =
-              f.notes?.function?.[0] || f.notes?.product?.[0] || "";
+            const geneName = f.notes?.gene?.[0] || ""; //obtenir gene Name
+            const func = f.notes?.function?.[0] || f.notes?.product?.[0] || ""; //obtenir funció
             const start = f.start;
             const end = f.end;
 
@@ -171,12 +126,10 @@ export default function Step4ReportedSites() {
                 existing.gene = geneName;
               }
 
-              // Si esta feature es CDS y trae función, la usamos
               if (f.type === "CDS" && func) {
                 existing.function = func;
                 existing.hasCDS = true;
               } else if (!existing.function && func) {
-                // Si aún no teníamos ninguna función, cogemos la que haya
                 existing.function = func;
               }
             }
@@ -191,35 +144,31 @@ export default function Step4ReportedSites() {
             sequence: seq,
             genes,
           });
+
         } catch (err) {
           console.error("Error loading genome:", err);
         }
       }
 
-      setGenomes(out);
+      setGenomes(out); //llista de tots els genomes ordenats
     }
 
     load();
   }, [genomeList]);
 
-  // =======================================================
-  // GIVEN A HIT, FIND NEARBY GENES (CADENA ±150 nt ENTRE GENES)
-  // =======================================================
-
+  // GIVEN A HIT, FIND GENES CERCANOS (CADENA ±150)
   function findGenesForHit(acc, hitStart, hitEnd) {
     const genome = genomes.find((g) => g.acc === acc);
     if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
-    const genes = genome.genes; // ya vienen ordenados por start
+    const genes = genome.genes;
 
-    // Distancia de un gen al sitio (0 si se solapan)
     const distToSite = (gene) => {
       if (hitEnd < gene.start) return gene.start - hitEnd;
       if (hitStart > gene.end) return hitStart - gene.end;
       return 0;
     };
 
-    // 1) gen más cercano al sitio
     let bestIdx = -1;
     let bestDist = Infinity;
     genes.forEach((g, idx) => {
@@ -230,7 +179,6 @@ export default function Step4ReportedSites() {
       }
     });
 
-    // si el más cercano está a >150 nt, no devolvemos nada
     if (bestIdx === -1 || bestDist > 150) return [];
 
     const result = [];
@@ -244,28 +192,23 @@ export default function Step4ReportedSites() {
       }
     };
 
-    // 2) añadimos el más cercano
     pushUnique(genes[bestIdx]);
 
-    // 3) expandimos hacia la izquierda mientras la distancia entre genes vecinos <=150
     let i = bestIdx - 1;
     while (i >= 0) {
       const current = genes[i];
       const next = genes[i + 1];
-      const gap = next.start - current.end; // si negativo, solapados
-
+      const gap = next.start - current.end;
       if (gap > 150) break;
       pushUnique(current);
       i--;
     }
 
-    // 4) expandimos hacia la derecha
     i = bestIdx + 1;
     while (i < genes.length) {
       const prev = genes[i - 1];
       const current = genes[i];
       const gap = current.start - prev.end;
-
       if (gap > 150) break;
       pushUnique(current);
       i++;
@@ -274,10 +217,7 @@ export default function Step4ReportedSites() {
     return result;
   }
 
-  // =======================================================
   // SEARCH EXACT MATCHES
-  // =======================================================
-
   function findExact() {
     const arr = rawSites
       .split(/\r?\n/g)
@@ -296,7 +236,6 @@ export default function Step4ReportedSites() {
       genomes.forEach((g) => {
         const seq = g.sequence;
 
-        // + strand
         let i = seq.indexOf(site);
         while (i !== -1) {
           all[site].push({
@@ -311,7 +250,6 @@ export default function Step4ReportedSites() {
           i = seq.indexOf(site, i + 1);
         }
 
-        // - strand
         let j = seq.indexOf(rc);
         while (j !== -1) {
           all[site].push({
@@ -334,20 +272,15 @@ export default function Step4ReportedSites() {
 
     setExactHits(all);
 
-    // reset elecciones
     const ch = {};
     arr.forEach((s) => (ch[s] = null));
     setChoice(ch);
 
-    // reset mismatches
     setFuzzyHits({});
     setShowFuzzy(false);
   }
 
-  // =======================================================
   // SEARCH FUZZY (1–2 mismatches)
-  // =======================================================
-
   function findFuzzy(site) {
     const L = site.length;
     const rc = revComp(site);
@@ -394,34 +327,23 @@ export default function Step4ReportedSites() {
     setShowFuzzy(true);
   }
 
-  // =======================================================
-  // CONFIRM (guardar estado + ir a Step5)
-  // =======================================================
-
-  const handleConfirm = () => {
-    setStep4State({
-      accordion,
+  // CONFIRM AND CONTINUE (igual que Step1)
+  function handleConfirm() {
+    setReportedSitesData({
       siteType,
       rawSites,
       sites,
-      genomesLoaded: genomes.length > 0, // info opcional
       exactHits,
       fuzzyHits,
       choice,
-      showFuzzy,
     });
     goToNextStep();
-  };
+  }
 
-  // =======================================================
   // RENDER
-  // =======================================================
-
   return (
     <div className="space-y-8">
-      {/* =======================================================
-          ACCORDION 1 — INPUT
-      ======================================================= */}
+      {/* ACCORDION 1 — INPUT */}
       <div className="bg-surface border border-border rounded p-4">
         <button
           className="flex justify-between w-full font-semibold mb-3"
@@ -433,7 +355,7 @@ export default function Step4ReportedSites() {
 
         {accordion.a1 && (
           <div className="space-y-3 text-sm">
-            {/* Site type */}
+            {/* Site type (como en el pipeline original) */}
             <div className="space-y-1">
               <label className="flex items-center gap-2">
                 <input
@@ -477,9 +399,7 @@ export default function Step4ReportedSites() {
         )}
       </div>
 
-      {/* =======================================================
-          ACCORDION 2 — EXACT MATCHES
-      ======================================================= */}
+      {/* ACCORDION 2 — EXACT MATCHES */}
       <div className="bg-surface border border-border rounded p-4">
         <button
           className="flex justify-between w-full font-semibold mb-3"
@@ -515,6 +435,7 @@ export default function Step4ReportedSites() {
                         key={i}
                         className="flex items-start gap-2 text-xs cursor-pointer"
                       >
+                        {/* círculo alineado al texto */}
                         <input
                           type="radio"
                           name={`ex-${site}`}
@@ -579,9 +500,7 @@ export default function Step4ReportedSites() {
         )}
       </div>
 
-      {/* =======================================================
-          ACCORDION 3 — MISMATCHES
-      ======================================================= */}
+      {/* ACCORDION 3 — MISMATCHES */}
       {showFuzzy && (
         <div className="bg-surface border border-border rounded p-4">
           <button
@@ -687,15 +606,9 @@ export default function Step4ReportedSites() {
           )}
         </div>
       )}
-
-      {/* =======================================================
-          BOTÓN FINAL — CONFIRM AND CONTINUE
-      ======================================================= */}
-      <div className="pt-2">
-        <button className="btn" onClick={handleConfirm}>
-          Confirm and continue →
-        </button>
-      </div>
+      <button className="btn" onClick={handleConfirm}>
+        Confirm and continue →
+      </button>
     </div>
   );
 }
