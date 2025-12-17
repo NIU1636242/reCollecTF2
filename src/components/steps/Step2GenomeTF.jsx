@@ -84,21 +84,28 @@ export default function Step2GenomeTF() {
     if (refseqList?.length) setRefseqItems(refseqList);
 
     if (strainData) {
+      // Checkbox: same strain genome
       if (typeof strainData.sameStrainGenome === "boolean") {
         setSameStrainGenome(strainData.sameStrainGenome);
       }
 
+      // Input: organism where TF binding sites are reported
+      setBindingOrganism(strainData.organismTFBindingSites || "");
+
+      // Checkbox: same strain TF
       if (typeof strainData.sameStrainTF === "boolean") {
         setSameStrainTF(strainData.sameStrainTF);
       }
 
-      setBindingOrganism(strainData.organismTFBindingSites || "");
+      // Input: organism of origin for reported TF
       setReportedTFOrganism(strainData.organismReportedTF || "");
 
+      // Checkbox: promoter information
       if (typeof strainData.promoterInfo === "boolean") {
         setPromoterInfo(strainData.promoterInfo);
       }
 
+      // Checkbox: expression information
       if (typeof strainData.expressionInfo === "boolean") {
         setExpressionInfo(strainData.expressionInfo);
       }
@@ -751,8 +758,7 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Genome NCBI accession number</h3>
         <p className="text-sm text-muted">
-          Paste the NCBI GenBank genome accession for the closest species or
-          strain (e.g. NC_000913.2).
+          Paste the NCBI GenBank genome accession for the closest species or strain (e.g. NC_000913.2).
         </p>
 
         <input
@@ -997,7 +1003,8 @@ export default function Step2GenomeTF() {
             onChange={(e) => setSameStrainTF(e.target.checked)}
           />
           <span>
-            This is the exact same strain as reported in the manuscript for the TF.
+            This is the exact same strain as reported in the manuscript for the
+            TF.
           </span>
         </label>
 
