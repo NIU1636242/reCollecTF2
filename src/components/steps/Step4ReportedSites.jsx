@@ -50,7 +50,7 @@ export default function Step4ReportedSites() {
     const [siteType, setSiteType] = useState("variable"); //tipus de site
     const [rawSites, setRawSites] = useState(""); //text introduït
     const [sites, setSites] = useState([]); //llista de secuencies
-    const [genomes, setGenomes] = useState([]); //info del genoma
+    const { genomes, setGenomes } = useCuration(); //info del genoma
     const [exactHits, setExactHits] = useState({});
     const [fuzzyHits, setFuzzyHits] = useState({});
     const [choice, setChoice] = useState({}); //guarda hit escollit per l'usuari

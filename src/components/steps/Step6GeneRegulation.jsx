@@ -5,11 +5,12 @@ import { useCuration } from "../../context/CurationContext";
 export default function Step6GeneRegulation() {
   const {
     step4Data,
-    genomeData,          // mismos genomas cargados en step4
     step6Data,
     setStep6Data,
     goToNextStep,
   } = useCuration();
+
+  const { genomes } = useCuration(); // mismos genomas cargados en step4
 
   const [regulation, setRegulation] = useState({});
 
@@ -56,7 +57,7 @@ export default function Step6GeneRegulation() {
   // FIND NEARBY GENES (±150 nt)
   // ============================
   function findGenesForHit(acc, hitStart, hitEnd) {
-    const genome = genomeData.find((g) => g.acc === acc);
+    const genome = genomes.find((g) => g.acc === acc);
     if (!genome || !genome.genes) return [];
 
     const genes = genome.genes;

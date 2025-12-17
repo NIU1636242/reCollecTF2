@@ -31,11 +31,14 @@ export function CurationProvider({ children }) {
 
   // STEP 4 – Reported sites
   const [step4Data, setStep4Data] = useState(null);
+  const [genomes, setGenomes] = useState([]);
+
 
   // STEP 5 – Site annotation
   const [step5Data, setStep5Data] = useState(null);
 
   const [step6Data, setStep6Data] = useState(null);
+
 
 
   const goToNextStep = () => setCurrentStep((s) => s + 1); //anar al següent pas
@@ -67,6 +70,8 @@ export function CurationProvider({ children }) {
         setStep5Data,
         step6Data,
         setStep6Data,
+        genomes,
+        setGenomes
       }}
     >
       {children}
