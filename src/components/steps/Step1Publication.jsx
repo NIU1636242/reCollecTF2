@@ -14,11 +14,15 @@ export default function Step1Publication() {
 
   useEffect(() => { //mostra dades al anar enrere
     if (publication) {
-      setArticle(publication);
+      setArticle({
+        ...publication,
+        doi: normalizeDOI(publication.doi),
+      });
       if (publication.pmid) setQuery(publication.pmid);
       else if (publication.doi) setQuery(publication.doi);
     }
   }, [publication]);
+
 
   //Main search function (PMID, DOI o TITLE)
   async function handleSearch(e) {
@@ -51,7 +55,7 @@ export default function Step1Publication() {
           authors: (rec.authors || []).map((a) => a.name).join(", "),
           journal: rec.fulljournalname || "Unknown",
           pubdate: rec.pubdate || "No date",
-          doi: rec.elocationid || "No DOI",
+          doi: normalizeDOI(rec.elocationid),
         };
       }
 
@@ -79,7 +83,8 @@ export default function Step1Publication() {
               authors: (rec.authors || []).map((a) => a.name).join(", "),
               journal: rec.fulljournalname || "Unknown",
               pubdate: rec.pubdate || "No date",
-              doi: rec.elocationid || q,
+              doi: normalizeDOI(rec.elocationid || q),
+
             };
           }
         }
@@ -135,10 +140,7 @@ export default function Step1Publication() {
           authors: (rec.authors || []).map((a) => a.name).join(", "),
           journal: rec.fulljournalname || "Unknown",
           pubdate: rec.pubdate || "No date",
-          doi:
-            rec.elocationid?.toLowerCase().startsWith("doi:")
-              ? rec.elocationid.slice(4)
-              : rec.elocationid || "No DOI",
+          doi: normalizeDOI(rec.elocationid),
         };
       }
 
@@ -153,6 +155,12 @@ export default function Step1Publication() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function normalizeDOI(raw) {
+    if (!raw) return "No DOI";
+    const m = raw.match(/10\.\d{4,9}\/\S+/i);
+    return m ? m[0] : raw;
   }
 
   const handleConfirm = () => {
