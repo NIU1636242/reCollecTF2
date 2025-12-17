@@ -25,7 +25,7 @@ export default function Step2GenomeTF() {
   const [searchName, setSearchName] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [tfRow, setTfRow] = useState(null); //nombre TF completo
-  
+
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTFName, setNewTFName] = useState("");
   const [tfDesc, setTfDesc] = useState("");
@@ -84,15 +84,26 @@ export default function Step2GenomeTF() {
     if (refseqList?.length) setRefseqItems(refseqList);
 
     if (strainData) {
-      setSameStrainGenome(strainData.sameStrainGenome || false);
-      setBindingOrganism(strainData.organismTFBindingSites || "");
+      if (typeof strainData.sameStrainGenome === "boolean") {
+        setSameStrainGenome(strainData.sameStrainGenome);
+      }
 
-      setSameStrainTF(strainData.sameStrainTF || false);
+      if (typeof strainData.sameStrainTF === "boolean") {
+        setSameStrainTF(strainData.sameStrainTF);
+      }
+
+      setBindingOrganism(strainData.organismTFBindingSites || "");
       setReportedTFOrganism(strainData.organismReportedTF || "");
 
-      setPromoterInfo(strainData.promoterInfo || false);
-      setExpressionInfo(strainData.expressionInfo || false);
+      if (typeof strainData.promoterInfo === "boolean") {
+        setPromoterInfo(strainData.promoterInfo);
+      }
+
+      if (typeof strainData.expressionInfo === "boolean") {
+        setExpressionInfo(strainData.expressionInfo);
+      }
     }
+
   }, []);
 
   //Load families de la base de dades
@@ -429,7 +440,7 @@ export default function Step2GenomeTF() {
     setGenomeInput("");
     setGenomeSuggestions([]);
   }
-  
+
   //Llegir input. Si està a la DB ho mostra, si no, executa la funció de la API
   async function handleUniprotEnter() {
     const acc = uniprotInput.trim();
@@ -986,8 +997,7 @@ export default function Step2GenomeTF() {
             onChange={(e) => setSameStrainTF(e.target.checked)}
           />
           <span>
-            This is the exact same strain as reported in the manuscript for the
-            TF.
+            This is the exact same strain as reported in the manuscript for the TF.
           </span>
         </label>
 
