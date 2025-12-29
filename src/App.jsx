@@ -9,6 +9,7 @@ import SummaryPanel from "./components/ui/SummaryPanel";
 import Step4ReportedSites from "./components/steps/Step4ReportedSites";
 import Step5SiteAnnotation from "./components/steps/Step5SiteAnnotation";
 import Step6GeneRegulation from "./components/steps/Step6GeneRegulation";
+import Step7CurationInfo from "./components/steps/Step7CurationInfo";
 
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
           {currentStep === 4 && <Step4ReportedSites />}
           {currentStep === 5 && <Step5SiteAnnotation />}
           {currentStep === 6 && <Step6GeneRegulation />}
+          {currentStep === 7 && <Step7CurationInfo />}
         </div>
 
         {/*Resum (zona dreta*/}
