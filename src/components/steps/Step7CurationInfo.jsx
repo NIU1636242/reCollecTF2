@@ -28,7 +28,6 @@ function isDoi(v) {
 function getSelectedHitForSite(site, step4Data) {
   const sel = step4Data?.choice?.[site];
   if (!sel) return null;
-
   if (sel.startsWith("ex-")) {
     const idx = Number(sel.split("-")[1]);
     return step4Data.exactHits?.[site]?.[idx] || null;
@@ -66,6 +65,11 @@ async function getColTypes(name) {
   const m = new Map();
   info.forEach((r) => m.set(r.name, (r.type || "").toUpperCase()));
   return m;
+}
+async function getPkCol(name) {
+  const info = await pragmaTableInfo(name);
+  const pk = info.find((r) => r.pk === 1);
+  return pk?.name || null;
 }
 function defaultForType(type) {
   const t = (type || "").toUpperCase();
@@ -108,7 +112,6 @@ export default function Step7CurationInfo() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // sin checkbox extra
   const canSubmit = useMemo(() => {
     return (
       !!publication &&
@@ -129,19 +132,10 @@ export default function Step7CurationInfo() {
   }
 
   async function resolveMotifTable() {
-    // Si core_curation_siteinstance tiene FK en motif_id, lo leemos
     if (!(await tableExists("core_curation_siteinstance"))) return null;
-
     const fks = await pragmaForeignKeys("core_curation_siteinstance");
     const motifFk = fks.find((fk) => fk.from === "motif_id");
-    if (motifFk?.table) return motifFk.table;
-
-    // Fallback: intenta nombres típicos (por si no hay FK declarado pero sí NOT NULL)
-    const candidates = ["core_motif", "core_metasite", "core_meta_site"];
-    for (const c of candidates) {
-      if (await tableExists(c)) return c;
-    }
-    return null;
+    return motifFk?.table || null;
   }
 
   async function buildSqlScript(normalizedTechniques) {
@@ -150,8 +144,11 @@ export default function Step7CurationInfo() {
     if (!step4Data?.sites?.length) throw new Error("Falta Step4 (reported sites).");
     if (!step5Data?.annotations) throw new Error("Falta Step5 (site annotation).");
 
-    // --- columns we will touch
+    // --- introspection
     const pubCols = await getCols("core_publication");
+    const pubNN = await getNotNullCols("core_publication");
+    const pubTypes = await getColTypes("core_publication");
+
     const curCols = await getCols("core_curation");
     const curNN = await getNotNullCols("core_curation");
     const curTypes = await getColTypes("core_curation");
@@ -164,62 +161,59 @@ export default function Step7CurationInfo() {
     const csiTypes = await getColTypes("core_curation_siteinstance");
 
     const tfiCols = await getCols("core_tfinstance");
-    const regTableExists = await tableExists("core_regulation");
-    const regCols = regTableExists ? await getCols("core_regulation") : new Set();
 
-    // --- publication identification (prefer PMID)
-    const pmid = publication?.pmid ? String(publication.pmid).trim() : "";
+    const regTableOk = await tableExists("core_regulation");
+    const regCols = regTableOk ? await getCols("core_regulation") : new Set();
+
+    // --- publication identity
+    const pmid = publication?.pmid != null ? String(publication.pmid).trim() : "";
     const doi = publication?.doi && publication.doi !== "No DOI" ? String(publication.doi).trim() : "";
 
-    const hasValidPmid = pmid && isPmid(pmid) && pubCols.has("pmid");
-    const hasValidDoi = doi && isDoi(doi) && pubCols.has("doi");
+    const hasPmid = pmid && isPmid(pmid) && pubCols.has("pmid");
+    const hasDoi = doi && isDoi(doi) && pubCols.has("doi");
 
-    if (!hasValidPmid && !hasValidDoi) {
+    if (!hasPmid && !hasDoi) {
       throw new Error(
-        "No puedo identificar la publicación para crear la curation. Necesito PMID numérico o DOI válido (y que existan esas columnas en core_publication)."
+        "No puedo identificar la publicación: necesito PMID numérico o DOI válido (y que existan esas columnas)."
       );
     }
 
-    const pubWhere = hasValidPmid
-      ? `pmid='${esc(pmid)}'`
-      : `doi='${esc(doi)}'`;
+    const pubWhere = hasPmid ? `pmid='${esc(pmid)}'` : `doi='${esc(doi)}'`;
 
-    // --- curation notes
+    // --- curation fields
     const requiresRevision = revisionReason !== "None";
     const revisionText = requiresRevision ? revisionReason : "";
     const combinedNotes = [revisionText ? `Revision reason: ${revisionText}` : null, notes ? notes : null]
       .filter(Boolean)
       .join("\n");
 
-    // --- species (NOT NULL en core_curation en tu workflow)
+    const containsPromoter = truthyBool(strainData?.promoterInfo);
+    const containsExpression = truthyBool(strainData?.expressionInfo);
+
     const firstGenomeOrg = genomeList?.[0]?.organism || genomeList?.[0]?.description || "";
     const tfSpecies =
       (strainData?.sameStrainTF ? firstGenomeOrg : strainData?.organismReportedTF) || "Unknown";
     const siteSpecies =
       (strainData?.sameStrainGenome ? firstGenomeOrg : strainData?.organismTFBindingSites) || "Unknown";
 
-    const containsPromoter = truthyBool(strainData?.promoterInfo);
-    const containsExpression = truthyBool(strainData?.expressionInfo);
-
-    // --- motif requirement
+    // --- motif requirements
     const motifIdIsNN = csiNN.has("motif_id");
     const motifTable = motifIdIsNN ? await resolveMotifTable() : null;
 
     if (motifIdIsNN && !motifTable) {
-      // esto evita que el workflow reviente sin saber por qué
       throw new Error(
-        "Tu DB requiere core_curation_siteinstance.motif_id (NOT NULL), pero no puedo resolver la tabla a la que apunta motif_id. " +
-          "Necesito que exista la FK o una tabla conocida (p.ej. core_motif/core_metasite) en la DB."
+        "Tu DB requiere core_curation_siteinstance.motif_id (NOT NULL) pero no hay FK declarada para saber a qué tabla apunta."
       );
     }
 
     const motifCols = motifTable ? await getCols(motifTable) : null;
     const motifNN = motifTable ? await getNotNullCols(motifTable) : null;
     const motifTypes = motifTable ? await getColTypes(motifTable) : null;
+    const motifPk = motifTable ? await getPkCol(motifTable) : null;
 
-    // --- gather all genomes we MUST ensure (genomeList + hit.acc)
-    const genomes = genomeList || [];
+    // --- genomes to ensure (genomeList + hits)
     const sites = step4Data.sites || [];
+    const genomes = genomeList || [];
     const needGenomeAcc = new Set(genomes.map((g) => g?.accession).filter(Boolean));
     for (const s of sites) {
       const hit = getSelectedHitForSite(s, step4Data);
@@ -230,7 +224,6 @@ export default function Step7CurationInfo() {
     const ref = refseqList || [];
     const annotations = step5Data.annotations || {};
     const regulation = step6Data || {};
-
     const tfName = String(tf?.name || "").trim();
     if (!tfName) throw new Error("TF inválido: falta nombre.");
 
@@ -249,55 +242,11 @@ export default function Step7CurationInfo() {
       "CREATE TEMP TABLE _tmp_sites(site TEXT PRIMARY KEY, site_instance_id INTEGER, curation_siteinstance_id INTEGER, motif_id INTEGER);"
     );
 
-    // 1) ensure publication exists
+    // -------------------------
+    // 1) Ensure publication exists (fill NOT NULL!)
+    // -------------------------
     {
-      const cols = [];
-      const vals = [];
-
-      if (hasValidPmid) {
-        cols.push("pmid");
-        vals.push(`'${esc(pmid)}'`);
-      }
-      if (hasValidDoi) {
-        cols.push("doi");
-        vals.push(`'${esc(doi)}'`);
-      }
-
-      if (pubCols.has("title")) {
-        cols.push("title");
-        vals.push(`'${esc(publication.title || "")}'`);
-      }
-      if (pubCols.has("authors")) {
-        cols.push("authors");
-        vals.push(`'${esc(publication.authors || "")}'`);
-      }
-      if (pubCols.has("journal")) {
-        cols.push("journal");
-        vals.push(`'${esc(publication.journal || "")}'`);
-      }
-      if (pubCols.has("publication_date")) {
-        cols.push("publication_date");
-        vals.push(`'${esc(publication.pubdate || "")}'`);
-      }
-
-      sql.push(
-        cols.length
-          ? `INSERT OR IGNORE INTO core_publication (${cols.join(",")}) VALUES (${vals.join(",")});`
-          : `INSERT OR IGNORE INTO core_publication DEFAULT VALUES;`
-      );
-
-      // update flags (si existen)
-      const ups = [];
-      if (pubCols.has("contains_promoter_data")) ups.push(`contains_promoter_data=${containsPromoter}`);
-      if (pubCols.has("contains_expression_data")) ups.push(`contains_expression_data=${containsExpression}`);
-      if (pubCols.has("submission_notes")) ups.push(`submission_notes='${esc(notes)}'`);
-      if (pubCols.has("curation_complete")) ups.push(`curation_complete=${truthyBool(curationComplete)}`);
-
-      if (ups.length) {
-        sql.push(`UPDATE core_publication SET ${ups.join(", ")} WHERE ${pubWhere};`);
-      }
-
-      // store publication_id for later (this avoids NULL publication_id)
+      // 1a) Try to capture existing publication_id
       sql.push(`
         INSERT INTO _tmp_pub(publication_id)
         SELECT publication_id
@@ -305,9 +254,78 @@ export default function Step7CurationInfo() {
         WHERE ${pubWhere}
         LIMIT 1;
       `);
+
+      // 1b) If no row, insert one that satisfies NOT NULL columns
+      // SQLite doesn't have IF in plain SQL, so we do "INSERT ... SELECT ... WHERE NOT EXISTS (...)"
+      const insertCols = [];
+      const insertVals = [];
+
+      // Put identity fields
+      if (hasPmid) {
+        insertCols.push("pmid");
+        insertVals.push(`'${esc(pmid)}'`);
+      }
+      if (hasDoi) {
+        insertCols.push("doi");
+        insertVals.push(`'${esc(doi)}'`);
+      }
+
+      // Common optional fields
+      if (pubCols.has("title")) {
+        insertCols.push("title");
+        insertVals.push(`'${esc(publication.title || "")}'`);
+      }
+      if (pubCols.has("authors")) {
+        insertCols.push("authors");
+        insertVals.push(`'${esc(publication.authors || "")}'`);
+      }
+      if (pubCols.has("journal")) {
+        insertCols.push("journal");
+        insertVals.push(`'${esc(publication.journal || "")}'`);
+      }
+      if (pubCols.has("publication_date")) {
+        insertCols.push("publication_date");
+        insertVals.push(`'${esc(publication.pubdate || "")}'`);
+      }
+
+      // Fill remaining NOT NULL (except PK)
+      for (const nn of pubNN) {
+        if (nn === "publication_id") continue;
+        if (insertCols.includes(nn)) continue;
+        insertCols.push(nn);
+        insertVals.push(defaultForType(pubTypes.get(nn)));
+      }
+
+      sql.push(`
+        INSERT INTO core_publication (${insertCols.join(",")})
+        SELECT ${insertVals.join(",")}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM core_publication WHERE ${pubWhere}
+        );
+      `);
+
+      // 1c) Update flags if columns exist
+      const ups = [];
+      if (pubCols.has("contains_promoter_data")) ups.push(`contains_promoter_data=${containsPromoter}`);
+      if (pubCols.has("contains_expression_data")) ups.push(`contains_expression_data=${containsExpression}`);
+      if (pubCols.has("submission_notes")) ups.push(`submission_notes='${esc(notes)}'`);
+      if (pubCols.has("curation_complete")) ups.push(`curation_complete=${truthyBool(curationComplete)}`);
+      if (ups.length) sql.push(`UPDATE core_publication SET ${ups.join(", ")} WHERE ${pubWhere};`);
+
+      // 1d) Ensure _tmp_pub now has publication_id (insert if still empty)
+      sql.push(`
+        INSERT INTO _tmp_pub(publication_id)
+        SELECT publication_id
+        FROM core_publication
+        WHERE ${pubWhere}
+          AND NOT EXISTS (SELECT 1 FROM _tmp_pub)
+        LIMIT 1;
+      `);
     }
 
-    // 2) ensure genomes exist (including step4 hits)
+    // -------------------------
+    // 2) Ensure genomes exist
+    // -------------------------
     for (const acc of Array.from(needGenomeAcc)) {
       if (!acc) continue;
       const g = genomes.find((x) => x?.accession === acc);
@@ -331,7 +349,9 @@ export default function Step7CurationInfo() {
       );
     }
 
-    // 3) ensure TF instances exist (optional but helps FK later)
+    // -------------------------
+    // 3) Ensure TF instances (optional)
+    // -------------------------
     {
       const maxLen = Math.max(uni.length, ref.length);
       for (let i = 0; i < maxLen; i++) {
@@ -345,7 +365,6 @@ export default function Step7CurationInfo() {
 
         const cols = [];
         const vals = [];
-
         if (tfiCols.has("uniprot_accession")) {
           cols.push("uniprot_accession");
           vals.push(uniprotAcc ? `'${esc(uniprotAcc)}'` : "NULL");
@@ -371,58 +390,9 @@ export default function Step7CurationInfo() {
       }
     }
 
-    // 4) techniques (solo si las tablas existen)
-    if (await tableExists("core_experimentaltechnique")) {
-      const techCols = await getCols("core_experimentaltechnique");
-
-      for (const t of normalizedTechniques) {
-        const eco = normalizeEco(t.eco);
-        if (!eco) continue;
-
-        const cols = [];
-        const vals = [];
-
-        if (techCols.has("EO_term")) {
-          cols.push("EO_term");
-          vals.push(`'${esc(eco)}'`);
-        }
-        if (techCols.has("description")) {
-          cols.push("description");
-          vals.push(`'${esc(t.description || t.techDescription || "")}'`);
-        }
-        if (techCols.has("name")) {
-          cols.push("name");
-          vals.push(t.name ? `'${esc(t.name)}'` : "NULL");
-        }
-        if (techCols.has("preset_function")) {
-          cols.push("preset_function");
-          vals.push("NULL");
-        }
-
-        sql.push(
-          cols.length
-            ? `INSERT OR IGNORE INTO core_experimentaltechnique (${cols.join(",")}) VALUES (${vals.join(",")});`
-            : `INSERT OR IGNORE INTO core_experimentaltechnique DEFAULT VALUES;`
-        );
-
-        // category bridge (si existe)
-        if (await tableExists("core_experimentaltechnique_categories")) {
-          const categoryId = t.categoryId || t.category_id || t.selectedCategory || null;
-          if (categoryId) {
-            sql.push(`
-              INSERT OR IGNORE INTO core_experimentaltechnique_categories
-                (experimentaltechnique_id, experimentaltechniquecategory_id)
-              VALUES (
-                (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(eco)}' LIMIT 1),
-                ${Number(categoryId)}
-              );
-            `);
-          }
-        }
-      }
-    }
-
-    // 5) create curation (rellena NOT NULL con defaults)
+    // -------------------------
+    // 4) Create curation (fill NOT NULL)
+    // -------------------------
     {
       const cols = [];
       const vals = [];
@@ -431,7 +401,6 @@ export default function Step7CurationInfo() {
         cols.push("publication_id");
         vals.push(`(SELECT publication_id FROM _tmp_pub LIMIT 1)`);
       }
-
       if (curCols.has("TF_species")) {
         cols.push("TF_species");
         vals.push(`'${esc(tfSpecies)}'`);
@@ -440,7 +409,6 @@ export default function Step7CurationInfo() {
         cols.push("site_species");
         vals.push(`'${esc(siteSpecies)}'`);
       }
-
       if (curCols.has("requires_revision")) {
         cols.push("requires_revision");
         vals.push(`${truthyBool(requiresRevision)}`);
@@ -454,7 +422,6 @@ export default function Step7CurationInfo() {
         vals.push(`'${esc(combinedNotes)}'`);
       }
 
-      // completa cualquier otro NOT NULL desconocido
       for (const nn of curNN) {
         if (nn === "curation_id") continue;
         if (cols.includes(nn)) continue;
@@ -466,37 +433,9 @@ export default function Step7CurationInfo() {
       sql.push(`INSERT INTO _tmp_curation(curation_id) VALUES (last_insert_rowid());`);
     }
 
-    // 6) link curation <-> TF_instances (solo si existe la tabla puente)
-    if (await tableExists("core_curation_TF_instances")) {
-      for (const u of uni) {
-        const acc = String(u?.accession || "").trim();
-        if (!acc) continue;
-        sql.push(`
-          INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
-          SELECT
-            (SELECT curation_id FROM _tmp_curation),
-            TF_instance_id
-          FROM core_tfinstance
-          WHERE uniprot_accession='${esc(acc)}'
-          LIMIT 1;
-        `);
-      }
-      for (const r of ref) {
-        const acc = String(r?.accession || "").trim();
-        if (!acc) continue;
-        sql.push(`
-          INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
-          SELECT
-            (SELECT curation_id FROM _tmp_curation),
-            TF_instance_id
-          FROM core_tfinstance
-          WHERE refseq_accession='${esc(acc)}'
-          LIMIT 1;
-        `);
-      }
-    }
-
-    // 7) sites: siteinstance + motif + curation_siteinstance + techniques + regulation
+    // -------------------------
+    // 5) Sites + motif/metasite + curation_siteinstance
+    // -------------------------
     for (const site of sites) {
       const hit = getSelectedHitForSite(site, step4Data);
       if (!hit) continue;
@@ -507,11 +446,10 @@ export default function Step7CurationInfo() {
       const strand = hit.strand || "+";
       const mappedSeq = hit.match || site;
 
-      // 7.1 insert siteinstance
+      // siteinstance
       {
         const cols = [];
         const vals = [];
-
         if (siteCols.has("genome_id")) {
           cols.push("genome_id");
           vals.push(`(SELECT genome_id FROM core_genome WHERE genome_accession='${esc(genomeAcc)}' LIMIT 1)`);
@@ -540,52 +478,45 @@ export default function Step7CurationInfo() {
         `);
       }
 
-      // 7.2 ensure motif row if needed
-      if (motifIdIsNN && motifTable) {
-        // crea una fila mínima cumpliendo NOT NULL
-        const mCols = [];
-        const mVals = [];
+      // motif/metasite if required (this fixes delegate_id NOT NULL)
+      if (motifIdIsNN && motifTable && motifPk) {
+        // compute next id for PK
+        sql.push(`
+          INSERT INTO ${motifTable} (${motifPk}, delegate_id${motifCols?.has("name") ? ", name" : ""})
+          SELECT
+            (SELECT IFNULL(MAX(${motifPk}),0)+1 FROM ${motifTable}),
+            (SELECT IFNULL(MAX(${motifPk}),0)+1 FROM ${motifTable})
+            ${motifCols?.has("name") ? `, '${esc(site)}'` : ""}
+          WHERE NOT EXISTS (
+            SELECT 1 FROM ${motifTable}
+            WHERE ${motifPk} = (SELECT IFNULL(MAX(${motifPk}),0)+1 FROM ${motifTable})
+          );
+        `);
 
-        // intenta usar algún campo típico para “identidad”
-        if (motifCols?.has("name")) {
-          mCols.push("name");
-          mVals.push(`'${esc(site)}'`);
-        } else if (motifCols?.has("sequence")) {
-          mCols.push("sequence");
-          mVals.push(`'${esc(site)}'`);
-        } else if (motifCols?.has("consensus")) {
-          mCols.push("consensus");
-          mVals.push(`'${esc(site)}'`);
-        } else if (motifCols?.has("delegate_id")) {
-          // en core_metasite existe delegate_id (según tu ER)
-          mCols.push("delegate_id");
-          mVals.push("NULL");
-        }
-
-        if (motifNN && motifTypes) {
-          for (const nn of motifNN) {
-            // evita PK autoincrement típica
-            if (nn.endsWith("_id") || nn === "id") continue;
-            if (mCols.includes(nn)) continue;
-            mCols.push(nn);
-            mVals.push(defaultForType(motifTypes.get(nn)));
-          }
-        }
-
-        if (mCols.length) {
-          sql.push(`INSERT INTO ${motifTable} (${mCols.join(",")}) VALUES (${mVals.join(",")});`);
-        } else {
-          sql.push(`INSERT INTO ${motifTable} DEFAULT VALUES;`);
-        }
-
+        // store motif_id (= inserted pk)
         sql.push(`
           UPDATE _tmp_sites
-          SET motif_id = last_insert_rowid()
+          SET motif_id = (SELECT MAX(${motifPk}) FROM ${motifTable})
           WHERE site='${esc(site)}';
         `);
+
+        // fill other NOT NULL columns if any (excluding pk/delegate_id)
+        if (motifNN && motifTypes) {
+          for (const nn of motifNN) {
+            if (nn === motifPk || nn === "delegate_id") continue;
+            if (!motifCols?.has(nn)) continue;
+            // set defaults if NULL
+            sql.push(`
+              UPDATE ${motifTable}
+              SET ${nn} = ${defaultForType(motifTypes.get(nn))}
+              WHERE ${motifPk} = (SELECT MAX(${motifPk}) FROM ${motifTable})
+                AND ${nn} IS NULL;
+            `);
+          }
+        }
       }
 
-      // 7.3 insert curation_siteinstance
+      // curation_siteinstance
       {
         const ann = annotations[site] || {};
         const tfType = ann.tfType || "not specified";
@@ -593,7 +524,6 @@ export default function Step7CurationInfo() {
 
         const cols = [];
         const vals = [];
-
         if (csiCols.has("curation_id")) {
           cols.push("curation_id");
           vals.push(`(SELECT curation_id FROM _tmp_curation)`);
@@ -618,13 +548,11 @@ export default function Step7CurationInfo() {
           cols.push("is_high_throughput");
           vals.push("0");
         }
-
         if (motifIdIsNN && csiCols.has("motif_id")) {
           cols.push("motif_id");
           vals.push(`(SELECT motif_id FROM _tmp_sites WHERE site='${esc(site)}')`);
         }
 
-        // completar otros NOT NULL
         for (const nn of csiNN) {
           if (nn === "id" || nn === "curation_siteinstance_id") continue;
           if (cols.includes(nn)) continue;
@@ -640,58 +568,36 @@ export default function Step7CurationInfo() {
         `);
       }
 
-      // 7.4 link techniques to site (si la tabla existe)
-      if (annotations[site]?.useTechniques && (await tableExists("core_curation_siteinstance_experimental_techniques"))) {
-        for (const t of normalizedTechniques) {
-          const eco = normalizeEco(t.eco);
-          if (!eco) continue;
-          sql.push(`
-            INSERT OR IGNORE INTO core_curation_siteinstance_experimental_techniques
-              (curation_siteinstance_id, experimentaltechnique_id)
-            SELECT
-              (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
-              technique_id
-            FROM core_experimentaltechnique
-            WHERE EO_term='${esc(eco)}'
-            LIMIT 1;
-          `);
-        }
-      }
-
-      // 7.5 regulation (solo inserta si gene existe -> evita FK fail)
-      if (regTableExists) {
+      // regulation (solo si gene existe, para evitar FK)
+      if (regTableOk) {
         const regGenes = regulation?.[site]?.regulatedGenes || [];
-        for (const g of regGenes) {
-          const locus = String(g?.locus || "").trim();
-          if (!locus) continue;
+        const csiCol =
+          regCols.has("curation_site_instance_id")
+            ? "curation_site_instance_id"
+            : regCols.has("curation_siteinstance_id")
+              ? "curation_siteinstance_id"
+              : null;
 
-          const csiCol =
-            regCols.has("curation_site_instance_id")
-              ? "curation_site_instance_id"
-              : regCols.has("curation_siteinstance_id")
-                ? "curation_siteinstance_id"
-                : null;
+        if (csiCol && regCols.has("gene_id")) {
+          for (const g of regGenes) {
+            const locus = String(g?.locus || "").trim();
+            if (!locus) continue;
 
-          if (!csiCol || !regCols.has("gene_id")) continue;
-
-          sql.push(`
-            INSERT OR IGNORE INTO core_regulation (${csiCol}, gene_id)
-            SELECT
-              (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
-              gene_id
-            FROM core_gene
-            WHERE locus_tag='${esc(locus)}'
-            LIMIT 1;
-          `);
+            sql.push(`
+              INSERT OR IGNORE INTO core_regulation (${csiCol}, gene_id)
+              SELECT
+                (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
+                gene_id
+              FROM core_gene
+              WHERE locus_tag='${esc(locus)}'
+              LIMIT 1;
+            `);
+          }
         }
       }
     }
 
-    // 8) update publication completion flag again
-    if (pubCols.has("curation_complete")) {
-      sql.push(`UPDATE core_publication SET curation_complete=${truthyBool(curationComplete)} WHERE ${pubWhere};`);
-    }
-
+    // final
     sql.push("COMMIT;");
     return sql.join("\n");
   }
@@ -765,19 +671,11 @@ export default function Step7CurationInfo() {
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Any additional notes on the curation process..."
           />
-          <p className="text-xs text-muted mt-1">
-            Include any relevant notes (e.g., why sites were left out, surrogate genome choice, etc.).
-          </p>
         </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <button
-          className="btn"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          title={!canSubmit ? "Complete required steps first." : ""}
-        >
+        <button className="btn" onClick={handleSubmit} disabled={!canSubmit}>
           {loading ? "Submitting..." : "Submit curation"}
         </button>
       </div>
