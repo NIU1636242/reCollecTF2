@@ -1,3 +1,4 @@
+// src/components/steps/Step7CurationInfo.jsx
 import { useMemo, useState } from "react";
 import { useCuration } from "../../context/CurationContext";
 import { runQuery } from "../../db/queryExecutor";
@@ -9,6 +10,7 @@ import { dispatchWorkflow } from "../../utils/serverless";
 function esc(str) {
   return String(str ?? "").replace(/'/g, "''");
 }
+
 function normalizeEco(raw) {
   if (!raw) return "";
   let s = String(raw).trim().toUpperCase();
@@ -16,18 +18,24 @@ function normalizeEco(raw) {
   if (!s.startsWith("ECO:")) s = "ECO:" + s;
   return s;
 }
+
 function truthyBool(v) {
   return v ? 1 : 0;
 }
+
 function isPmid(v) {
   return typeof v === "string" && /^\d+$/.test(v.trim());
 }
+
 function isDoi(v) {
   return typeof v === "string" && v.includes("/");
 }
+
+// Reconstruct selected hit from step4Data
 function getSelectedHitForSite(site, step4Data) {
   const sel = step4Data?.choice?.[site];
   if (!sel) return null;
+
   if (sel.startsWith("ex-")) {
     const idx = Number(sel.split("-")[1]);
     return step4Data.exactHits?.[site]?.[idx] || null;
@@ -39,6 +47,32 @@ function getSelectedHitForSite(site, step4Data) {
   return null;
 }
 
+// --- SQLite introspection helpers
+async function getTableInfo(table) {
+  return await runQuery(`PRAGMA table_info(${table});`); // [{cid,name,type,notnull,dflt_value,pk}]
+}
+
+async function getCols(table) {
+  const info = await getTableInfo(table);
+  return new Set(info.map((r) => r.name));
+}
+
+async function getNotNullCols(table) {
+  const info = await getTableInfo(table);
+  return new Set(info.filter((r) => r.notnull === 1).map((r) => r.name));
+}
+
+async function getColTypes(table) {
+  const info = await getTableInfo(table);
+  const m = new Map();
+  info.forEach((r) => m.set(r.name, (r.type || "").toUpperCase()));
+  return m;
+}
+
+async function getForeignKeys(table) {
+  return await runQuery(`PRAGMA foreign_key_list(${table});`); // [{id,seq,table,from,to,on_update,on_delete,match}]
+}
+
 async function tableExists(name) {
   const rows = await runQuery(
     `SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1;`,
@@ -46,33 +80,10 @@ async function tableExists(name) {
   );
   return rows.length > 0;
 }
-async function pragmaTableInfo(name) {
-  return await runQuery(`PRAGMA table_info(${name});`);
-}
-async function pragmaForeignKeys(name) {
-  return await runQuery(`PRAGMA foreign_key_list(${name});`);
-}
-async function getCols(name) {
-  const info = await pragmaTableInfo(name);
-  return new Set(info.map((r) => r.name));
-}
-async function getNotNullCols(name) {
-  const info = await pragmaTableInfo(name);
-  return new Set(info.filter((r) => r.notnull === 1).map((r) => r.name));
-}
-async function getColTypes(name) {
-  const info = await pragmaTableInfo(name);
-  const m = new Map();
-  info.forEach((r) => m.set(r.name, (r.type || "").toUpperCase()));
-  return m;
-}
-async function getPkCol(name) {
-  const info = await pragmaTableInfo(name);
-  const pk = info.find((r) => r.pk === 1);
-  return pk?.name || null;
-}
-function defaultForType(type) {
-  const t = (type || "").toUpperCase();
+
+function pickDefaultForType(type) {
+  if (!type) return "''";
+  const t = type.toUpperCase();
   if (t.includes("INT") || t.includes("REAL") || t.includes("NUM")) return "0";
   return "''";
 }
@@ -105,6 +116,7 @@ export default function Step7CurationInfo() {
     []
   );
 
+  // UI state
   const [revisionReason, setRevisionReason] = useState("None");
   const [curationComplete, setCurationComplete] = useState(true);
   const [notes, setNotes] = useState("");
@@ -112,16 +124,21 @@ export default function Step7CurationInfo() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
+  // Basic guardrails: sin checkbox extra
   const canSubmit = useMemo(() => {
     return (
       !!publication &&
       !!tf &&
+      (genomeList?.length ?? 0) > 0 &&
+      (uniprotList?.length ?? 0) > 0 &&
+      (refseqList?.length ?? 0) > 0 &&
       (step4Data?.sites?.length ?? 0) > 0 &&
       !!step5Data?.annotations &&
       !loading
     );
-  }, [publication, tf, step4Data, step5Data, loading]);
+  }, [publication, tf, genomeList, uniprotList, refseqList, step4Data, step5Data, loading]);
 
+  // Normalize techniques: soporta strings o objetos
   function normalizeTechList(raw) {
     const list = (raw || []).map((t) =>
       typeof t === "string"
@@ -131,58 +148,104 @@ export default function Step7CurationInfo() {
     return list.filter((x) => x.eco);
   }
 
-  async function resolveMotifTable() {
+  // Resolve motif table: FK first, then heuristic fallback
+  async function resolveMotifTableHeuristic() {
     if (!(await tableExists("core_curation_siteinstance"))) return null;
-    const fks = await pragmaForeignKeys("core_curation_siteinstance");
+
+    const fks = await getForeignKeys("core_curation_siteinstance");
     const motifFk = fks.find((fk) => fk.from === "motif_id");
-    return motifFk?.table || null;
+    if (motifFk?.table) return motifFk.table;
+
+    // No FK declared → heuristic fallback
+    if (await tableExists("core_motif")) return "core_motif";
+    if (await tableExists("core_metasite")) return "core_metasite";
+
+    return null;
   }
 
+  // Build SQL script (robusto)
   async function buildSqlScript(normalizedTechniques) {
-    if (!publication) throw new Error("Falta Step1 (publication).");
-    if (!tf) throw new Error("Falta Step2 (TF).");
-    if (!step4Data?.sites?.length) throw new Error("Falta Step4 (reported sites).");
-    if (!step5Data?.annotations) throw new Error("Falta Step5 (site annotation).");
+    if (!publication) throw new Error("Falta publication.");
+    if (!tf) throw new Error("Falta TF.");
+    if (!step4Data?.sites?.length) throw new Error("Falta Step4.");
+    if (!step5Data?.annotations) throw new Error("Falta Step5.");
 
-    // --- introspection
+    // -------------------------
+    // Introspección del schema real
+    // -------------------------
     const pubCols = await getCols("core_publication");
-    const pubNN = await getNotNullCols("core_publication");
-    const pubTypes = await getColTypes("core_publication");
-
     const curCols = await getCols("core_curation");
     const curNN = await getNotNullCols("core_curation");
     const curTypes = await getColTypes("core_curation");
 
+    const tfCols = await getCols("core_tf");
+    const famCols = await getCols("core_tffamily");
     const genomeCols = await getCols("core_genome");
+    const tfiCols = await getCols("core_tfinstance");
+    const techCols = await getCols("core_experimentaltechnique");
     const siteCols = await getCols("core_siteinstance");
 
     const csiCols = await getCols("core_curation_siteinstance");
     const csiNN = await getNotNullCols("core_curation_siteinstance");
-    const csiTypes = await getColTypes("core_curation_siteinstance");
 
-    const tfiCols = await getCols("core_tfinstance");
+    const regCols = await getCols("core_regulation");
 
-    const regTableOk = await tableExists("core_regulation");
-    const regCols = regTableOk ? await getCols("core_regulation") : new Set();
+    // motif handling: detect NOT NULL need and resolve table
+    const motifIdIsNN = csiNN.has("motif_id");
+    const motifTable = motifIdIsNN ? await resolveMotifTableHeuristic() : null;
 
-    // --- publication identity
-    const pmid = publication?.pmid != null ? String(publication.pmid).trim() : "";
-    const doi = publication?.doi && publication.doi !== "No DOI" ? String(publication.doi).trim() : "";
-
-    const hasPmid = pmid && isPmid(pmid) && pubCols.has("pmid");
-    const hasDoi = doi && isDoi(doi) && pubCols.has("doi");
-
-    if (!hasPmid && !hasDoi) {
+    if (motifIdIsNN && !motifTable) {
       throw new Error(
-        "No puedo identificar la publicación: necesito PMID numérico o DOI válido (y que existan esas columnas)."
+        "Tu DB requiere core_curation_siteinstance.motif_id (NOT NULL) pero no se encontró tabla destino. " +
+          "No hay FK y tampoco existe core_motif ni core_metasite."
       );
     }
 
-    const pubWhere = hasPmid ? `pmid='${esc(pmid)}'` : `doi='${esc(doi)}'`;
+    const motifCols = motifTable ? await getCols(motifTable) : null;
+    const motifNN = motifTable ? await getNotNullCols(motifTable) : null;
+    const motifTypes = motifTable ? await getColTypes(motifTable) : null;
 
-    // --- curation fields
+    // -------------------------
+    // Publication identification clause
+    // -------------------------
+    const pubIdClause =
+      publication.pmid && isPmid(publication.pmid)
+        ? `pmid='${esc(publication.pmid)}'`
+        : publication.doi &&
+          publication.doi !== "No DOI" &&
+          isDoi(publication.doi) &&
+          pubCols.has("doi")
+        ? `doi='${esc(publication.doi)}'`
+        : null;
+
+    // si no hay doi column, usa url si existe
+    const doiUrl =
+      publication.doi && publication.doi !== "No DOI" && isDoi(publication.doi)
+        ? `https://doi.org/${publication.doi}`
+        : "";
+
+    const pubAltClause =
+      pubIdClause ||
+      (publication.pmid && pubCols.has("pmid") ? `pmid='${esc(publication.pmid)}'` : null) ||
+      (doiUrl && pubCols.has("url") ? `url='${esc(doiUrl)}'` : null);
+
+    if (!pubAltClause) {
+      throw new Error("No se puede identificar la publication: falta PMID y/o el schema no soporta DOI/URL.");
+    }
+
+    // -------------------------
+    // Species (NOT NULL en core_curation típicamente)
+    // -------------------------
+    const firstGenomeOrg = genomeList?.[0]?.organism || genomeList?.[0]?.description || "";
+    const tfSpecies = strainData?.sameStrainTF ? firstGenomeOrg : strainData?.organismReportedTF || "";
+    const siteSpecies = strainData?.sameStrainGenome ? firstGenomeOrg : strainData?.organismTFBindingSites || "";
+
+    // -------------------------
+    // Prep curation info
+    // -------------------------
     const requiresRevision = revisionReason !== "None";
     const revisionText = requiresRevision ? revisionReason : "";
+
     const combinedNotes = [revisionText ? `Revision reason: ${revisionText}` : null, notes ? notes : null]
       .filter(Boolean)
       .join("\n");
@@ -190,224 +253,309 @@ export default function Step7CurationInfo() {
     const containsPromoter = truthyBool(strainData?.promoterInfo);
     const containsExpression = truthyBool(strainData?.expressionInfo);
 
-    const firstGenomeOrg = genomeList?.[0]?.organism || genomeList?.[0]?.description || "";
-    const tfSpecies =
-      (strainData?.sameStrainTF ? firstGenomeOrg : strainData?.organismReportedTF) || "Unknown";
-    const siteSpecies =
-      (strainData?.sameStrainGenome ? firstGenomeOrg : strainData?.organismTFBindingSites) || "Unknown";
-
-    // --- motif requirements
-    const motifIdIsNN = csiNN.has("motif_id");
-    const motifTable = motifIdIsNN ? await resolveMotifTable() : null;
-
-    if (motifIdIsNN && !motifTable) {
-      throw new Error(
-        "Tu DB requiere core_curation_siteinstance.motif_id (NOT NULL) pero no hay FK declarada para saber a qué tabla apunta."
-      );
-    }
-
-    const motifCols = motifTable ? await getCols(motifTable) : null;
-    const motifNN = motifTable ? await getNotNullCols(motifTable) : null;
-    const motifTypes = motifTable ? await getColTypes(motifTable) : null;
-    const motifPk = motifTable ? await getPkCol(motifTable) : null;
-
-    // --- genomes to ensure (genomeList + hits)
-    const sites = step4Data.sites || [];
-    const genomes = genomeList || [];
-    const needGenomeAcc = new Set(genomes.map((g) => g?.accession).filter(Boolean));
-    for (const s of sites) {
-      const hit = getSelectedHitForSite(s, step4Data);
-      if (hit?.acc) needGenomeAcc.add(hit.acc);
-    }
-
-    const uni = uniprotList || [];
-    const ref = refseqList || [];
-    const annotations = step5Data.annotations || {};
-    const regulation = step6Data || {};
-    const tfName = String(tf?.name || "").trim();
+    // -------------------------
+    // TF / family
+    // -------------------------
+    const tfIsExisting = !!tf?.TF_id;
+    const tfName = (tf?.name || "").trim();
     if (!tfName) throw new Error("TF inválido: falta nombre.");
 
+    const wantsNewFamily = !!tf?.isNewFamily;
+    const newFamilyName = (tf?.newFamilyName || tf?.family || "").trim();
+    const newFamilyDesc = tf?.newFamilyDesc || tf?.family_description || "";
+    const existingFamilyId = tf?.family_id || tf?.familyId || null;
+
+    // -------------------------
+    // Data from steps
+    // -------------------------
+    const genomes = genomeList || [];
+    const uni = uniprotList || [];
+    const ref = refseqList || [];
+    const sites = step4Data?.sites || [];
+    const annotations = step5Data?.annotations || {};
+    const regulation = step6Data || {};
+
+    // -------------------------
+    // SQL generation
+    // -------------------------
     const sql = [];
     sql.push("BEGIN TRANSACTION;");
 
-    // temp ids
-    sql.push("DROP TABLE IF EXISTS _tmp_pub;");
-    sql.push("CREATE TEMP TABLE _tmp_pub(publication_id INTEGER NOT NULL);");
-
+    // temp tables
     sql.push("DROP TABLE IF EXISTS _tmp_curation;");
-    sql.push("CREATE TEMP TABLE _tmp_curation(curation_id INTEGER NOT NULL);");
+    sql.push("CREATE TEMP TABLE _tmp_curation(curation_id INTEGER);");
 
     sql.push("DROP TABLE IF EXISTS _tmp_sites;");
     sql.push(
       "CREATE TEMP TABLE _tmp_sites(site TEXT PRIMARY KEY, site_instance_id INTEGER, curation_siteinstance_id INTEGER, motif_id INTEGER);"
     );
 
-    // -------------------------
-    // 1) Ensure publication exists (fill NOT NULL!)
-    // -------------------------
+    // 1) Ensure publication exists (only columns that exist)
     {
-      // 1a) Try to capture existing publication_id
-      sql.push(`
-        INSERT INTO _tmp_pub(publication_id)
-        SELECT publication_id
-        FROM core_publication
-        WHERE ${pubWhere}
-        LIMIT 1;
-      `);
+      const cols = [];
+      const vals = [];
 
-      // 1b) If no row, insert one that satisfies NOT NULL columns
-      // SQLite doesn't have IF in plain SQL, so we do "INSERT ... SELECT ... WHERE NOT EXISTS (...)"
-      const insertCols = [];
-      const insertVals = [];
-
-      // Put identity fields
-      if (hasPmid) {
-        insertCols.push("pmid");
-        insertVals.push(`'${esc(pmid)}'`);
-      }
-      if (hasDoi) {
-        insertCols.push("doi");
-        insertVals.push(`'${esc(doi)}'`);
+      if (pubCols.has("pmid") && publication.pmid && isPmid(publication.pmid)) {
+        cols.push("pmid");
+        vals.push(`'${esc(publication.pmid)}'`);
       }
 
-      // Common optional fields
+      if (pubCols.has("doi") && publication.doi && publication.doi !== "No DOI" && isDoi(publication.doi)) {
+        cols.push("doi");
+        vals.push(`'${esc(publication.doi)}'`);
+      } else if (!pubCols.has("doi") && pubCols.has("url") && doiUrl) {
+        cols.push("url");
+        vals.push(`'${esc(doiUrl)}'`);
+      }
+
       if (pubCols.has("title")) {
-        insertCols.push("title");
-        insertVals.push(`'${esc(publication.title || "")}'`);
+        cols.push("title");
+        vals.push(`'${esc(publication.title || "")}'`);
       }
       if (pubCols.has("authors")) {
-        insertCols.push("authors");
-        insertVals.push(`'${esc(publication.authors || "")}'`);
+        cols.push("authors");
+        vals.push(`'${esc(publication.authors || "")}'`);
       }
       if (pubCols.has("journal")) {
-        insertCols.push("journal");
-        insertVals.push(`'${esc(publication.journal || "")}'`);
+        cols.push("journal");
+        vals.push(`'${esc(publication.journal || "")}'`);
       }
       if (pubCols.has("publication_date")) {
-        insertCols.push("publication_date");
-        insertVals.push(`'${esc(publication.pubdate || "")}'`);
+        cols.push("publication_date");
+        vals.push(`'${esc(publication.pubdate || "")}'`);
+      } else if (pubCols.has("pubdate")) {
+        cols.push("pubdate");
+        vals.push(`'${esc(publication.pubdate || "")}'`);
       }
 
-      // Fill remaining NOT NULL (except PK)
-      for (const nn of pubNN) {
-        if (nn === "publication_id") continue;
-        if (insertCols.includes(nn)) continue;
-        insertCols.push(nn);
-        insertVals.push(defaultForType(pubTypes.get(nn)));
+      if (cols.length === 0) {
+        sql.push(`INSERT OR IGNORE INTO core_publication DEFAULT VALUES;`);
+      } else {
+        sql.push(`
+          INSERT OR IGNORE INTO core_publication (${cols.join(",")})
+          VALUES (${vals.join(",")});
+        `);
       }
 
-      sql.push(`
-        INSERT INTO core_publication (${insertCols.join(",")})
-        SELECT ${insertVals.join(",")}
-        WHERE NOT EXISTS (
-          SELECT 1 FROM core_publication WHERE ${pubWhere}
-        );
-      `);
+      // Update flags if they exist
+      const up = [];
+      if (pubCols.has("contains_promoter_data")) up.push(`contains_promoter_data=${containsPromoter}`);
+      if (pubCols.has("contains_expression_data")) up.push(`contains_expression_data=${containsExpression}`);
+      if (pubCols.has("submission_notes")) up.push(`submission_notes='${esc(notes)}'`);
+      if (pubCols.has("curation_complete")) up.push(`curation_complete=${truthyBool(curationComplete)}`);
 
-      // 1c) Update flags if columns exist
-      const ups = [];
-      if (pubCols.has("contains_promoter_data")) ups.push(`contains_promoter_data=${containsPromoter}`);
-      if (pubCols.has("contains_expression_data")) ups.push(`contains_expression_data=${containsExpression}`);
-      if (pubCols.has("submission_notes")) ups.push(`submission_notes='${esc(notes)}'`);
-      if (pubCols.has("curation_complete")) ups.push(`curation_complete=${truthyBool(curationComplete)}`);
-      if (ups.length) sql.push(`UPDATE core_publication SET ${ups.join(", ")} WHERE ${pubWhere};`);
-
-      // 1d) Ensure _tmp_pub now has publication_id (insert if still empty)
-      sql.push(`
-        INSERT INTO _tmp_pub(publication_id)
-        SELECT publication_id
-        FROM core_publication
-        WHERE ${pubWhere}
-          AND NOT EXISTS (SELECT 1 FROM _tmp_pub)
-        LIMIT 1;
-      `);
+      if (up.length) {
+        sql.push(`
+          UPDATE core_publication
+          SET ${up.join(", ")}
+          WHERE ${pubAltClause};
+        `);
+      }
     }
 
-    // -------------------------
-    // 2) Ensure genomes exist
-    // -------------------------
-    for (const acc of Array.from(needGenomeAcc)) {
+    // 2) Ensure family / TF
+    if (!tfIsExisting) {
+      if (wantsNewFamily) {
+        if (!newFamilyName) throw new Error("Falta el nombre de la nueva TF family.");
+        if (famCols.has("name")) {
+          const famInsertCols = ["name"];
+          const famInsertVals = [`'${esc(newFamilyName)}'`];
+          if (famCols.has("description")) {
+            famInsertCols.push("description");
+            famInsertVals.push(`'${esc(newFamilyDesc)}'`);
+          }
+          sql.push(`
+            INSERT OR IGNORE INTO core_tffamily (${famInsertCols.join(",")})
+            VALUES (${famInsertVals.join(",")});
+          `);
+        } else {
+          sql.push(`INSERT OR IGNORE INTO core_tffamily DEFAULT VALUES;`);
+        }
+      }
+
+      // family expr
+      let familyExpr = "NULL";
+      if (wantsNewFamily && newFamilyName) {
+        familyExpr = `(SELECT tf_family_id FROM core_tffamily WHERE name='${esc(newFamilyName)}' LIMIT 1)`;
+      } else if (existingFamilyId) {
+        familyExpr = Number(existingFamilyId);
+      } else if (tf?.family) {
+        familyExpr = `(SELECT tf_family_id FROM core_tffamily WHERE name='${esc(tf.family)}' LIMIT 1)`;
+      }
+
+      const tfInsertCols = [];
+      const tfInsertVals = [];
+
+      if (tfCols.has("name")) {
+        tfInsertCols.push("name");
+        tfInsertVals.push(`'${esc(tfName)}'`);
+      }
+      if (tfCols.has("family_id")) {
+        tfInsertCols.push("family_id");
+        tfInsertVals.push(`${familyExpr}`);
+      }
+      if (tfCols.has("description")) {
+        tfInsertCols.push("description");
+        tfInsertVals.push(`'${esc(tf.description || "")}'`);
+      }
+
+      if (tfInsertCols.length === 0) {
+        sql.push(`INSERT OR IGNORE INTO core_tf DEFAULT VALUES;`);
+      } else {
+        sql.push(`
+          INSERT OR IGNORE INTO core_tf (${tfInsertCols.join(",")})
+          VALUES (${tfInsertVals.join(",")});
+        `);
+      }
+    }
+
+    // 3) Ensure genomes exist
+    for (const g of genomes) {
+      const acc = g.accession;
+      const organism = g.organism || g.description || "";
       if (!acc) continue;
-      const g = genomes.find((x) => x?.accession === acc);
-      const organism = g?.organism || g?.description || "";
+
+      const gCols = [];
+      const gVals = [];
+
+      if (genomeCols.has("genome_accession")) {
+        gCols.push("genome_accession");
+        gVals.push(`'${esc(acc)}'`);
+      }
+      if (genomeCols.has("organism")) {
+        gCols.push("organism");
+        gVals.push(`'${esc(organism)}'`);
+      }
+
+      if (gCols.length === 0) {
+        sql.push(`INSERT OR IGNORE INTO core_genome DEFAULT VALUES;`);
+      } else {
+        sql.push(`
+          INSERT OR IGNORE INTO core_genome (${gCols.join(",")})
+          VALUES (${gVals.join(",")});
+        `);
+      }
+    }
+
+    // 4) Ensure TF instances exist
+    const maxLen = Math.max(uni.length, ref.length);
+    for (let i = 0; i < maxLen; i++) {
+      const u = uni[i];
+      const r = ref[i];
+      const uniprotAcc = (u?.accession || "").trim();
+      const refseqAcc = (r?.accession || "").trim();
+      if (!uniprotAcc && !refseqAcc) continue;
+
+      const desc = (u?.description || r?.description || "").trim();
 
       const cols = [];
       const vals = [];
-      if (genomeCols.has("genome_accession")) {
-        cols.push("genome_accession");
-        vals.push(`'${esc(acc)}'`);
+
+      if (tfiCols.has("uniprot_accession")) {
+        cols.push("uniprot_accession");
+        vals.push(uniprotAcc ? `'${esc(uniprotAcc)}'` : "NULL");
       }
-      if (genomeCols.has("organism")) {
-        cols.push("organism");
-        vals.push(`'${esc(organism)}'`);
+      if (tfiCols.has("refseq_accession")) {
+        cols.push("refseq_accession");
+        vals.push(refseqAcc ? `'${esc(refseqAcc)}'` : "NULL");
+      }
+      if (tfiCols.has("description")) {
+        cols.push("description");
+        vals.push(`'${esc(desc)}'`);
+      }
+      if (tfiCols.has("TF_id")) {
+        cols.push("TF_id");
+        vals.push(`(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)`);
       }
 
-      sql.push(
-        cols.length
-          ? `INSERT OR IGNORE INTO core_genome (${cols.join(",")}) VALUES (${vals.join(",")});`
-          : `INSERT OR IGNORE INTO core_genome DEFAULT VALUES;`
-      );
-    }
+      if (cols.length === 0) {
+        sql.push(`INSERT OR IGNORE INTO core_tfinstance DEFAULT VALUES;`);
+      } else {
+        sql.push(`
+          INSERT OR IGNORE INTO core_tfinstance (${cols.join(",")})
+          VALUES (${vals.join(",")});
+        `);
+      }
 
-    // -------------------------
-    // 3) Ensure TF instances (optional)
-    // -------------------------
-    {
-      const maxLen = Math.max(uni.length, ref.length);
-      for (let i = 0; i < maxLen; i++) {
-        const u = uni[i];
-        const r = ref[i];
-        const uniprotAcc = String(u?.accession || "").trim();
-        const refseqAcc = String(r?.accession || "").trim();
-        if (!uniprotAcc && !refseqAcc) continue;
-
-        const desc = String(u?.description || r?.description || "").trim();
-
-        const cols = [];
-        const vals = [];
-        if (tfiCols.has("uniprot_accession")) {
-          cols.push("uniprot_accession");
-          vals.push(uniprotAcc ? `'${esc(uniprotAcc)}'` : "NULL");
+      // Update TF_id if missing
+      if (tfiCols.has("TF_id")) {
+        if (uniprotAcc && tfiCols.has("uniprot_accession")) {
+          sql.push(`
+            UPDATE core_tfinstance
+            SET TF_id=(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)
+            WHERE uniprot_accession='${esc(uniprotAcc)}' AND (TF_id IS NULL OR TF_id='');
+          `);
         }
-        if (tfiCols.has("refseq_accession")) {
-          cols.push("refseq_accession");
-          vals.push(refseqAcc ? `'${esc(refseqAcc)}'` : "NULL");
+        if (refseqAcc && tfiCols.has("refseq_accession")) {
+          sql.push(`
+            UPDATE core_tfinstance
+            SET TF_id=(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)
+            WHERE refseq_accession='${esc(refseqAcc)}' AND (TF_id IS NULL OR TF_id='');
+          `);
         }
-        if (tfiCols.has("description")) {
-          cols.push("description");
-          vals.push(`'${esc(desc)}'`);
-        }
-        if (tfiCols.has("TF_id")) {
-          cols.push("TF_id");
-          vals.push(`(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)`);
-        }
-
-        sql.push(
-          cols.length
-            ? `INSERT OR IGNORE INTO core_tfinstance (${cols.join(",")}) VALUES (${vals.join(",")});`
-            : `INSERT OR IGNORE INTO core_tfinstance DEFAULT VALUES;`
-        );
       }
     }
 
-    // -------------------------
-    // 4) Create curation (fill NOT NULL)
-    // -------------------------
+    // 5) Ensure experimental techniques exist
+    for (const t of normalizedTechniques) {
+      const eco = normalizeEco(t.eco);
+      if (!eco) continue;
+
+      const cols = [];
+      const vals = [];
+
+      if (techCols.has("EO_term")) {
+        cols.push("EO_term");
+        vals.push(`'${esc(eco)}'`);
+      }
+      if (techCols.has("description")) {
+        cols.push("description");
+        vals.push(`'${esc(t.description || t.techDescription || "")}'`);
+      }
+      if (techCols.has("name")) {
+        cols.push("name");
+        vals.push(t.name ? `'${esc(t.name)}'` : "NULL");
+      }
+      if (techCols.has("preset_function")) {
+        cols.push("preset_function");
+        vals.push("NULL");
+      }
+
+      if (cols.length === 0) {
+        sql.push(`INSERT OR IGNORE INTO core_experimentaltechnique DEFAULT VALUES;`);
+      } else {
+        sql.push(`
+          INSERT OR IGNORE INTO core_experimentaltechnique (${cols.join(",")})
+          VALUES (${vals.join(",")});
+        `);
+      }
+
+      // category bridge (optional)
+      const categoryId = t.categoryId || t.category_id || t.selectedCategory || null;
+      if (categoryId) {
+        sql.push(`
+          INSERT OR IGNORE INTO core_experimentaltechnique_categories
+            (experimentaltechnique_id, experimentaltechniquecategory_id)
+          VALUES (
+            (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(eco)}' LIMIT 1),
+            ${Number(categoryId)}
+          );
+        `);
+      }
+    }
+
+    // 6) Create curation (rellena NOT NULL)
     {
       const cols = [];
       const vals = [];
 
       if (curCols.has("publication_id")) {
         cols.push("publication_id");
-        vals.push(`(SELECT publication_id FROM _tmp_pub LIMIT 1)`);
+        vals.push(`(SELECT publication_id FROM core_publication WHERE ${pubAltClause} LIMIT 1)`);
       }
-      if (curCols.has("TF_species")) {
-        cols.push("TF_species");
-        vals.push(`'${esc(tfSpecies)}'`);
-      }
-      if (curCols.has("site_species")) {
-        cols.push("site_species");
-        vals.push(`'${esc(siteSpecies)}'`);
+      if (curCols.has("notes")) {
+        cols.push("notes");
+        vals.push(`'${esc(combinedNotes)}'`);
       }
       if (curCols.has("requires_revision")) {
         cols.push("requires_revision");
@@ -417,25 +565,61 @@ export default function Step7CurationInfo() {
         cols.push("forms_complex");
         vals.push("0");
       }
-      if (curCols.has("notes")) {
-        cols.push("notes");
-        vals.push(`'${esc(combinedNotes)}'`);
+      if (curCols.has("TF_species")) {
+        cols.push("TF_species");
+        vals.push(`'${esc((tfSpecies || "").trim() || "Unknown")}'`);
+      }
+      if (curCols.has("site_species")) {
+        cols.push("site_species");
+        vals.push(`'${esc((siteSpecies || "").trim() || "Unknown")}'`);
       }
 
+      // Fill other NOT NULL with defaults
       for (const nn of curNN) {
-        if (nn === "curation_id") continue;
         if (cols.includes(nn)) continue;
+        if (nn === "curation_id") continue;
         cols.push(nn);
-        vals.push(defaultForType(curTypes.get(nn)));
+        vals.push(pickDefaultForType(curTypes.get(nn)));
       }
 
-      sql.push(`INSERT INTO core_curation (${cols.join(",")}) VALUES (${vals.join(",")});`);
+      sql.push(`
+        INSERT INTO core_curation (${cols.join(",")})
+        VALUES (${vals.join(",")});
+      `);
       sql.push(`INSERT INTO _tmp_curation(curation_id) VALUES (last_insert_rowid());`);
     }
 
-    // -------------------------
-    // 5) Sites + motif/metasite + curation_siteinstance
-    // -------------------------
+    // 7) Link curation to TF instances (safe: only if table exists)
+    if (await tableExists("core_curation_TF_instances")) {
+      for (const u of uni) {
+        const acc = (u?.accession || "").trim();
+        if (!acc) continue;
+        sql.push(`
+          INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
+          SELECT
+            (SELECT curation_id FROM _tmp_curation),
+            TF_instance_id
+          FROM core_tfinstance
+          WHERE uniprot_accession='${esc(acc)}'
+          LIMIT 1;
+        `);
+      }
+      for (const r of ref) {
+        const acc = (r?.accession || "").trim();
+        if (!acc) continue;
+        sql.push(`
+          INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
+          SELECT
+            (SELECT curation_id FROM _tmp_curation),
+            TF_instance_id
+          FROM core_tfinstance
+          WHERE refseq_accession='${esc(acc)}'
+          LIMIT 1;
+        `);
+      }
+    }
+
+    // 8) Sites: siteinstance + motif + curation_siteinstance + techniques + regulation
     for (const site of sites) {
       const hit = getSelectedHitForSite(site, step4Data);
       if (!hit) continue;
@@ -446,10 +630,11 @@ export default function Step7CurationInfo() {
       const strand = hit.strand || "+";
       const mappedSeq = hit.match || site;
 
-      // siteinstance
+      // --- Insert siteinstance
       {
         const cols = [];
         const vals = [];
+
         if (siteCols.has("genome_id")) {
           cols.push("genome_id");
           vals.push(`(SELECT genome_id FROM core_genome WHERE genome_accession='${esc(genomeAcc)}' LIMIT 1)`);
@@ -469,54 +654,89 @@ export default function Step7CurationInfo() {
         if (siteCols.has("seq")) {
           cols.push("seq");
           vals.push(`'${esc(mappedSeq)}'`);
+        } else if (siteCols.has("sequence")) {
+          cols.push("sequence");
+          vals.push(`'${esc(mappedSeq)}'`);
         }
 
-        sql.push(`INSERT INTO core_siteinstance (${cols.join(",")}) VALUES (${vals.join(",")});`);
+        if (cols.length === 0) {
+          sql.push(`INSERT INTO core_siteinstance DEFAULT VALUES;`);
+        } else {
+          sql.push(`
+            INSERT INTO core_siteinstance (${cols.join(",")})
+            VALUES (${vals.join(",")});
+          `);
+        }
+
         sql.push(`
           INSERT OR REPLACE INTO _tmp_sites(site, site_instance_id, curation_siteinstance_id, motif_id)
           VALUES ('${esc(site)}', last_insert_rowid(), NULL, NULL);
         `);
       }
 
-      // motif/metasite if required (this fixes delegate_id NOT NULL)
-      if (motifIdIsNN && motifTable && motifPk) {
-        // compute next id for PK
-        sql.push(`
-          INSERT INTO ${motifTable} (${motifPk}, delegate_id${motifCols?.has("name") ? ", name" : ""})
-          SELECT
-            (SELECT IFNULL(MAX(${motifPk}),0)+1 FROM ${motifTable}),
-            (SELECT IFNULL(MAX(${motifPk}),0)+1 FROM ${motifTable})
-            ${motifCols?.has("name") ? `, '${esc(site)}'` : ""}
-          WHERE NOT EXISTS (
-            SELECT 1 FROM ${motifTable}
-            WHERE ${motifPk} = (SELECT IFNULL(MAX(${motifPk}),0)+1 FROM ${motifTable})
-          );
-        `);
+      // --- Create motif/metasite row if motif_id is NOT NULL
+      if (motifIdIsNN && motifTable) {
+        if (motifTable === "core_metasite") {
+          // core_metasite: meta_site_id + delegate_id are NOT NULL (per your workflow error)
+          const msCols = await getCols("core_metasite");
+          const hasName = msCols.has("name");
 
-        // store motif_id (= inserted pk)
-        sql.push(`
-          UPDATE _tmp_sites
-          SET motif_id = (SELECT MAX(${motifPk}) FROM ${motifTable})
-          WHERE site='${esc(site)}';
-        `);
+          sql.push(`
+            INSERT INTO core_metasite (meta_site_id, delegate_id${hasName ? ", name" : ""})
+            SELECT
+              (SELECT IFNULL(MAX(meta_site_id),0)+1 FROM core_metasite),
+              (SELECT IFNULL(MAX(meta_site_id),0)+1 FROM core_metasite)
+              ${hasName ? `, '${esc(site)}'` : ""}
+            ;
+          `);
 
-        // fill other NOT NULL columns if any (excluding pk/delegate_id)
-        if (motifNN && motifTypes) {
-          for (const nn of motifNN) {
-            if (nn === motifPk || nn === "delegate_id") continue;
-            if (!motifCols?.has(nn)) continue;
-            // set defaults if NULL
-            sql.push(`
-              UPDATE ${motifTable}
-              SET ${nn} = ${defaultForType(motifTypes.get(nn))}
-              WHERE ${motifPk} = (SELECT MAX(${motifPk}) FROM ${motifTable})
-                AND ${nn} IS NULL;
-            `);
+          sql.push(`
+            UPDATE _tmp_sites
+            SET motif_id = (SELECT MAX(meta_site_id) FROM core_metasite)
+            WHERE site='${esc(site)}';
+          `);
+        } else {
+          // generic motif table: satisfy NOT NULL with safe defaults
+          const mCols = [];
+          const mVals = [];
+
+          if (motifCols?.has("consensus")) {
+            mCols.push("consensus");
+            mVals.push(`'${esc(site)}'`);
+          } else if (motifCols?.has("sequence")) {
+            mCols.push("sequence");
+            mVals.push(`'${esc(site)}'`);
+          } else if (motifCols?.has("name")) {
+            mCols.push("name");
+            mVals.push(`'${esc(site)}'`);
           }
+
+          if (motifNN && motifTypes) {
+            for (const nn of motifNN) {
+              if (mCols.includes(nn)) continue;
+              // Skip PK-like
+              if (nn.endsWith("_id") && (nn.includes("motif") || nn === "id")) continue;
+              mCols.push(nn);
+              mVals.push(pickDefaultForType(motifTypes.get(nn)));
+            }
+          }
+
+          if (mCols.length === 0) {
+            sql.push(`INSERT INTO ${motifTable} DEFAULT VALUES;`);
+          } else {
+            sql.push(`INSERT INTO ${motifTable} (${mCols.join(",")}) VALUES (${mVals.join(",")});`);
+          }
+
+          // Try to capture inserted id (assume last_insert_rowid matches PK row)
+          sql.push(`
+            UPDATE _tmp_sites
+            SET motif_id = last_insert_rowid()
+            WHERE site='${esc(site)}';
+          `);
         }
       }
 
-      // curation_siteinstance
+      // --- Insert curation_siteinstance
       {
         const ann = annotations[site] || {};
         const tfType = ann.tfType || "not specified";
@@ -524,6 +744,7 @@ export default function Step7CurationInfo() {
 
         const cols = [];
         const vals = [];
+
         if (csiCols.has("curation_id")) {
           cols.push("curation_id");
           vals.push(`(SELECT curation_id FROM _tmp_curation)`);
@@ -532,10 +753,15 @@ export default function Step7CurationInfo() {
           cols.push("site_instance_id");
           vals.push(`(SELECT site_instance_id FROM _tmp_sites WHERE site='${esc(site)}')`);
         }
+
         if (csiCols.has("annotated_seq")) {
           cols.push("annotated_seq");
           vals.push(`'${esc(site)}'`);
+        } else if (csiCols.has("annotated_sequence")) {
+          cols.push("annotated_sequence");
+          vals.push(`'${esc(site)}'`);
         }
+
         if (csiCols.has("TF_type")) {
           cols.push("TF_type");
           vals.push(`'${esc(tfType)}'`);
@@ -548,19 +774,26 @@ export default function Step7CurationInfo() {
           cols.push("is_high_throughput");
           vals.push("0");
         }
+
         if (motifIdIsNN && csiCols.has("motif_id")) {
           cols.push("motif_id");
           vals.push(`(SELECT motif_id FROM _tmp_sites WHERE site='${esc(site)}')`);
         }
 
+        // Fill other NOT NULL in curation_siteinstance with safe defaults
+        const csiTypes = await getColTypes("core_curation_siteinstance");
         for (const nn of csiNN) {
-          if (nn === "id" || nn === "curation_siteinstance_id") continue;
           if (cols.includes(nn)) continue;
+          if (nn === "id" || nn === "curation_siteinstance_id") continue;
           cols.push(nn);
-          vals.push(defaultForType(csiTypes.get(nn)));
+          vals.push(pickDefaultForType(csiTypes.get(nn)));
         }
 
-        sql.push(`INSERT INTO core_curation_siteinstance (${cols.join(",")}) VALUES (${vals.join(",")});`);
+        sql.push(`
+          INSERT INTO core_curation_siteinstance (${cols.join(",")})
+          VALUES (${vals.join(",")});
+        `);
+
         sql.push(`
           UPDATE _tmp_sites
           SET curation_siteinstance_id = last_insert_rowid()
@@ -568,36 +801,71 @@ export default function Step7CurationInfo() {
         `);
       }
 
-      // regulation (solo si gene existe, para evitar FK)
-      if (regTableOk) {
-        const regGenes = regulation?.[site]?.regulatedGenes || [];
-        const csiCol =
-          regCols.has("curation_site_instance_id")
-            ? "curation_site_instance_id"
-            : regCols.has("curation_siteinstance_id")
-              ? "curation_siteinstance_id"
-              : null;
+      // --- Link techniques to this site if useTechniques
+      if (annotations[site]?.useTechniques && (await tableExists("core_curation_siteinstance_experimental_techniques"))) {
+        for (const t of normalizedTechniques) {
+          const eco = normalizeEco(t.eco);
+          if (!eco) continue;
+          sql.push(`
+            INSERT OR IGNORE INTO core_curation_siteinstance_experimental_techniques
+              (curation_siteinstance_id, experimentaltechnique_id)
+            VALUES (
+              (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
+              (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(eco)}' LIMIT 1)
+            );
+          `);
+        }
+      }
 
-        if (csiCol && regCols.has("gene_id")) {
-          for (const g of regGenes) {
-            const locus = String(g?.locus || "").trim();
-            if (!locus) continue;
+      // --- Regulation (if genes exist)
+      const regGenes = regulation?.[site]?.regulatedGenes || [];
+      for (const g of regGenes) {
+        const locus = (g?.locus || "").trim();
+        if (!locus) continue;
 
-            sql.push(`
-              INSERT OR IGNORE INTO core_regulation (${csiCol}, gene_id)
-              SELECT
-                (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
-                gene_id
-              FROM core_gene
-              WHERE locus_tag='${esc(locus)}'
-              LIMIT 1;
-            `);
-          }
+        const cols = [];
+        const vals = [];
+
+        if (regCols.has("curation_site_instance_id")) {
+          cols.push("curation_site_instance_id");
+          vals.push(`(SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}')`);
+        } else if (regCols.has("curation_siteinstance_id")) {
+          cols.push("curation_siteinstance_id");
+          vals.push(`(SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}')`);
+        }
+
+        if (regCols.has("gene_id")) {
+          cols.push("gene_id");
+          vals.push(`(SELECT gene_id FROM core_gene WHERE locus_tag='${esc(locus)}' LIMIT 1)`);
+        }
+
+        if (regCols.has("evidence_type")) {
+          cols.push("evidence_type");
+          vals.push("NULL");
+        }
+        if (regCols.has("meta_site_id")) {
+          cols.push("meta_site_id");
+          vals.push("NULL");
+        }
+
+        if (cols.length) {
+          sql.push(`
+            INSERT OR IGNORE INTO core_regulation (${cols.join(",")})
+            VALUES (${vals.join(",")});
+          `);
         }
       }
     }
 
-    // final
+    // 9) Update publication completion flag again
+    if (pubCols.has("curation_complete")) {
+      sql.push(`
+        UPDATE core_publication
+        SET curation_complete=${truthyBool(curationComplete)}
+        WHERE ${pubAltClause};
+      `);
+    }
+
     sql.push("COMMIT;");
     return sql.join("\n");
   }
@@ -613,9 +881,12 @@ export default function Step7CurationInfo() {
     setLoading(true);
     try {
       const normalized = normalizeTechList(techniques);
+
       const sqlString = await buildSqlScript(normalized);
 
-      await dispatchWorkflow({ inputs: { queries: sqlString } });
+      await dispatchWorkflow({
+        inputs: { queries: sqlString },
+      });
 
       setMsg("✅ Curación enviada. La base de datos se actualizará automáticamente tras el workflow y redeploy.");
     } catch (e) {
@@ -631,6 +902,7 @@ export default function Step7CurationInfo() {
       <h2 className="text-2xl font-bold">Step 7 – Curation information</h2>
 
       <div className="bg-surface border border-border rounded p-4 space-y-3">
+        {/* Revision required */}
         <div>
           <label className="block font-medium mb-1">Revision required</label>
           <select
@@ -649,6 +921,7 @@ export default function Step7CurationInfo() {
           </p>
         </div>
 
+        {/* Complete */}
         <label className="inline-flex items-start gap-2 text-sm">
           <input
             type="checkbox"
@@ -663,6 +936,7 @@ export default function Step7CurationInfo() {
           </span>
         </label>
 
+        {/* Notes */}
         <div>
           <label className="block font-medium mb-1">Notes</label>
           <textarea
@@ -671,11 +945,19 @@ export default function Step7CurationInfo() {
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Any additional notes on the curation process..."
           />
+          <p className="text-xs text-muted mt-1">
+            Include any relevant notes (e.g., why sites were left out, surrogate genome choice, etc.).
+          </p>
         </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <button className="btn" onClick={handleSubmit} disabled={!canSubmit}>
+        <button
+          className="btn"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          title={!canSubmit ? "Complete required steps first." : ""}
+        >
           {loading ? "Submitting..." : "Submit curation"}
         </button>
       </div>
