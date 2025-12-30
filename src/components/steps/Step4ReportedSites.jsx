@@ -29,12 +29,51 @@ function buildBars(a, b) {
 }
 
 // -----------------------------
-// Networking helpers (CORS-safe)
+// Proxy (same as Step1)
 // -----------------------------
-const NCBI = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi";
+const PROXY = "https://corsproxy.io/?";
+const BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi";
 
-function buildNcbiUrl({ db = "nuccore", id, rettype, retmode = "text" }) {
-  const u = new URL(NCBI);
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function fetchTextViaCorsProxy(url, { retries = 2, delayMs = 600 } = {}) {
+  let lastErr = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(PROXY + encodeURIComponent(url));
+      if (!res.ok) {
+        lastErr = new Error(`HTTP ${res.status}`);
+        // 403/429/5xx -> wait and retry
+        if ([403, 429].includes(res.status) || res.status >= 500) {
+          await sleep(delayMs * (attempt + 1));
+          continue;
+        }
+        throw lastErr;
+      }
+
+      const txt = await res.text();
+      // sometimes proxies return HTML error pages
+      const t = (txt || "").trim().toLowerCase();
+      if (t.startsWith("<!doctype html") || t.startsWith("<html")) {
+        lastErr = new Error("Unexpected HTML response from proxy");
+        await sleep(delayMs * (attempt + 1));
+        continue;
+      }
+      return txt;
+    } catch (e) {
+      lastErr = e;
+      await sleep(delayMs * (attempt + 1));
+    }
+  }
+
+  throw lastErr || new Error("Failed to fetch via corsproxy");
+}
+
+function ncbiUrl({ id, rettype, retmode = "text", db = "nuccore" }) {
+  const u = new URL(BASE);
   u.searchParams.set("db", db);
   u.searchParams.set("id", id);
   u.searchParams.set("rettype", rettype);
@@ -42,116 +81,18 @@ function buildNcbiUrl({ db = "nuccore", id, rettype, retmode = "text" }) {
   return u.toString();
 }
 
-function proxify(url, proxyKind) {
-  const enc = encodeURIComponent(url);
-
-  switch (proxyKind) {
-    case "direct":
-      return url;
-
-    // Jina "reader" proxy - often works for CORS text fetches
-    case "jina":
-      // IMPORTANT: no encode here; jina expects plain URL after scheme strip
-      return `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
-
-    // AllOrigins raw
-    case "allorigins":
-      return `https://api.allorigins.win/raw?url=${enc}`;
-
-    // Thingproxy
-    case "thingproxy":
-      return `https://thingproxy.freeboard.io/fetch/${url}`;
-
-    // corsproxy.io legacy
-    case "corsproxy":
-      return `https://corsproxy.io/?${enc}`;
-
-    default:
-      return url;
-  }
-}
-
-function looksLikeHtml(txt) {
-  const t = (txt || "").trim().toLowerCase();
-  return t.startsWith("<!doctype html") || t.startsWith("<html") || t.includes("<head>");
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function fetchTextOnce(url, { timeoutMs = 12000 } = {}) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      signal: ctrl.signal,
-      headers: { Accept: "text/plain,*/*" },
-    });
-
-    const txt = await res.text();
-    clearTimeout(t);
-
-    return { ok: res.ok, status: res.status, txt };
-  } catch (e) {
-    clearTimeout(t);
-    throw e;
-  }
-}
-
-async function fetchTextWithFallback(originalUrl, { timeoutMs = 12000 } = {}) {
-  // Ordered for GitHub Pages friendliness. (Removed isomorphic-git: often 403)
-  const proxyOrder = ["jina", "allorigins", "thingproxy", "corsproxy", "direct"];
-  let lastErr = null;
-
-  for (const proxy of proxyOrder) {
-    const url = proxify(originalUrl, proxy);
-
-    // retries for transient 429/5xx
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { ok, status, txt } = await fetchTextOnce(url, { timeoutMs });
-
-        if (!ok) {
-          lastErr = new Error(`HTTP ${status} (${proxy})`);
-          if (status === 429 || status >= 500) await sleep(700 * (attempt + 1));
-          continue;
-        }
-
-        if (!txt || looksLikeHtml(txt)) {
-          lastErr = new Error(`Unexpected HTML/empty response (${proxy})`);
-          continue;
-        }
-
-        return txt;
-      } catch (e) {
-        lastErr = e;
-        await sleep(350 * (attempt + 1));
-        continue;
-      }
-    }
-  }
-
-  throw lastErr || new Error("Failed to download resource (all proxies failed).");
-}
-
 // -----------------------------
-// MAIN COMPONENT
+// MAIN
 // -----------------------------
 export default function Step4ReportedSites() {
   const { genomeList, step4Data, setStep4Data, goToNextStep } = useCuration();
 
-  // Accordions
   const [accordion, setAccordion] = useState({ a1: true, a2: true, a3: false });
   const toggleAcc = (k) => setAccordion((p) => ({ ...p, [k]: !p[k] }));
 
-  // User input
   const [siteType, setSiteType] = useState("variable");
   const [rawSites, setRawSites] = useState("");
 
-  // Saved sites / matches
   const [sites, setSites] = useState([]);
   const [exactHits, setExactHits] = useState({});
   const [fuzzyHits, setFuzzyHits] = useState({});
@@ -159,26 +100,19 @@ export default function Step4ReportedSites() {
   const [showFuzzy, setShowFuzzy] = useState(false);
   const [activeSite, setActiveSite] = useState(null);
 
-  // Requirement #8: Exact matches accordion appears only after Save
+  // requirement #8
   const [hasSaved, setHasSaved] = useState(false);
 
-  // Genomes local
+  // genome loading
   const [genomes, setGenomes] = useState([]);
   const [loadingGenomes, setLoadingGenomes] = useState(false);
   const [genomeMsg, setGenomeMsg] = useState("");
 
-  // Cache: accession -> {sequence, genes}
   const genomeCacheRef = useRef(new Map());
 
-  // Prevent repeated auto-recompute after load
-  const autoComputedRef = useRef(false);
-
-  // -----------------------------
-  // RESTORE state when coming back
-  // -----------------------------
+  // restore
   useEffect(() => {
     if (!step4Data) return;
-
     setSiteType(step4Data.siteType || "variable");
     setRawSites(step4Data.rawSites || "");
     setSites(step4Data.sites || []);
@@ -188,9 +122,6 @@ export default function Step4ReportedSites() {
     setShowFuzzy(step4Data.showFuzzy || false);
     setActiveSite(step4Data.activeSite || (step4Data.sites?.[0] ?? null));
     setHasSaved(!!step4Data.hasSaved);
-
-    // if coming back with saved data, do not auto compute again
-    autoComputedRef.current = !!step4Data.hasSaved;
   }, [step4Data]);
 
   useEffect(() => {
@@ -201,9 +132,7 @@ export default function Step4ReportedSites() {
     setActiveSite((prev) => (prev && sites.includes(prev) ? prev : sites[0]));
   }, [sites]);
 
-  // -----------------------------
-  // LOAD GENOMES (FASTA + GENBANK)
-  // -----------------------------
+  // load genomes
   useEffect(() => {
     if (!genomeList || genomeList.length === 0) return;
 
@@ -214,32 +143,33 @@ export default function Step4ReportedSites() {
       setGenomeMsg("Loading genome data from NCBI...");
 
       const out = [];
+
       for (const g of genomeList) {
         const acc = g.accession;
         if (!acc) continue;
 
-        // cache
         if (genomeCacheRef.current.has(acc)) {
           out.push({ acc, ...genomeCacheRef.current.get(acc) });
           continue;
         }
 
         try {
-          const fastaUrl = buildNcbiUrl({ db: "nuccore", id: acc, rettype: "fasta", retmode: "text" });
-          const fastaText = await fetchTextWithFallback(fastaUrl);
-
+          // FASTA
+          const fastaUrl = ncbiUrl({ id: acc, rettype: "fasta", retmode: "text" });
+          const fastaText = await fetchTextViaCorsProxy(fastaUrl);
           const seq = fastaText.replace(/>.*/g, "").replace(/[^ATCGatcg]/g, "").toUpperCase();
           if (!seq || seq.length < 100) throw new Error(`Empty/invalid FASTA for ${acc}`);
 
-          const gbUrl = buildNcbiUrl({ db: "nuccore", id: acc, rettype: "gbwithparts", retmode: "text" });
-          const gbText = await fetchTextWithFallback(gbUrl);
+          // IMPORTANT: lighter GenBank to avoid proxy 403
+          // was: gbwithparts (huge) -> now: gb (much smaller)
+          const gbUrl = ncbiUrl({ id: acc, rettype: "gb", retmode: "text" });
+          const gbText = await fetchTextViaCorsProxy(gbUrl);
 
           const parsed = genbankParser(gbText);
           const entry = parsed?.[0];
           const features = entry?.features || [];
 
-          // Merge gene + CDS by locus_tag
-          // IMPORTANT: function must come from /product (Requirement #6)
+          // merge by locus_tag, prefer CDS /product
           const locusMap = new Map();
 
           for (const f of features) {
@@ -249,11 +179,10 @@ export default function Step4ReportedSites() {
             if (!locus) continue;
 
             const geneName = f.notes?.gene?.[0] || "";
-            const product = f.notes?.product?.[0] || ""; // ✅ prefer product always
+            const product = f.notes?.product?.[0] || ""; // ✅ ALWAYS product
             const start = f.start;
             const end = f.end;
 
-            // strand inference (best-effort)
             const strand =
               f.strand === -1 || f.complement === true || String(f.location || "").includes("complement")
                 ? "-"
@@ -263,28 +192,26 @@ export default function Step4ReportedSites() {
               locusMap.set(locus, {
                 locus,
                 gene: geneName,
-                function: product, // ✅ store product into function display
+                function: product,
                 start,
                 end,
                 strand,
                 hasCDS: f.type === "CDS",
               });
             } else {
-              const existing = locusMap.get(locus);
-              existing.start = Math.min(existing.start, start);
-              existing.end = Math.max(existing.end, end);
+              const ex = locusMap.get(locus);
+              ex.start = Math.min(ex.start, start);
+              ex.end = Math.max(ex.end, end);
+              if (!ex.gene && geneName) ex.gene = geneName;
 
-              if (!existing.gene && geneName) existing.gene = geneName;
-
-              // prefer CDS product if present
               if (f.type === "CDS" && product) {
-                existing.function = product;
-                existing.hasCDS = true;
-              } else if (!existing.function && product) {
-                existing.function = product;
+                ex.function = product;
+                ex.hasCDS = true;
+              } else if (!ex.function && product) {
+                ex.function = product;
               }
-              // keep strand as is; if any feature suggests complement, mark '-'
-              if (strand === "-") existing.strand = "-";
+
+              if (strand === "-") ex.strand = "-";
             }
           }
 
@@ -292,25 +219,26 @@ export default function Step4ReportedSites() {
 
           const payload = { sequence: seq, genes };
           genomeCacheRef.current.set(acc, payload);
-
           out.push({ acc, ...payload });
+
+          // throttle a bit to avoid proxy limits
+          await sleep(250);
         } catch (err) {
           console.error("Error loading genome:", acc, err);
           out.push({ acc, sequence: "", genes: [], error: String(err?.message || err) });
+          await sleep(400);
         }
       }
 
       if (cancelled) return;
 
       setGenomes(out);
-
       const bad = out.filter((x) => !x.sequence).length;
-      if (bad > 0) {
-        setGenomeMsg(`Loaded ${out.length} genome(s). Some downloads failed (see console).`);
-      } else {
-        setGenomeMsg(`Loaded ${out.length} genome(s) successfully.`);
-      }
-
+      setGenomeMsg(
+        bad > 0
+          ? `Loaded ${out.length} genome(s). Some downloads failed (see console).`
+          : `Loaded ${out.length} genome(s) successfully.`
+      );
       setLoadingGenomes(false);
     }
 
@@ -320,23 +248,15 @@ export default function Step4ReportedSites() {
     };
   }, [genomeList]);
 
-  // -----------------------------
-  // GIVEN A HIT, FIND GENES (Requirement #3 & #7)
-  // Anchor gene: FIRST gene to the RIGHT of the site (start > hitEnd).
-  // Then expand left/right while gap between neighbor genes <=150.
-  // Always return at least one gene if genes exist.
-  // -----------------------------
+  // Requirement #3: anchor gene = first to the RIGHT, then expand by ±150 gaps
   function findGenesForHit(acc, hitStart, hitEnd) {
     const genome = genomes.find((g) => g.acc === acc);
     if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
     const genes = genome.genes;
 
-    // 1) anchor: first gene to the right (start > hitEnd)
     let anchorIdx = genes.findIndex((g) => g.start > hitEnd);
-
-    // If none to the right, fallback to last gene (closest on the left)
-    if (anchorIdx === -1) anchorIdx = genes.length - 1;
+    if (anchorIdx === -1) anchorIdx = genes.length - 1; // fallback to last if none to the right
 
     const result = [];
     const pushUnique = (g) => {
@@ -352,21 +272,20 @@ export default function Step4ReportedSites() {
       }
     };
 
-    // 2) include anchor always (even far away)
     pushUnique(genes[anchorIdx]);
 
-    // 3) expand left while neighbor gap <=150
+    // left
     let i = anchorIdx - 1;
     while (i >= 0) {
       const current = genes[i];
       const next = genes[i + 1];
-      const gap = next.start - current.end; // negative = overlap
+      const gap = next.start - current.end;
       if (gap > 150) break;
       pushUnique(current);
       i--;
     }
 
-    // 4) expand right while neighbor gap <=150
+    // right
     i = anchorIdx + 1;
     while (i < genes.length) {
       const prev = genes[i - 1];
@@ -377,14 +296,10 @@ export default function Step4ReportedSites() {
       i++;
     }
 
-    // keep result sorted by start for nice display
     result.sort((a, b) => a.start - b.start);
     return result;
   }
 
-  // -----------------------------
-  // Completion rules
-  // -----------------------------
   function isCompleted(site) {
     const c = choice?.[site];
     return typeof c === "string" && (c.startsWith("ex-") || c.startsWith("fz-"));
@@ -395,11 +310,9 @@ export default function Step4ReportedSites() {
     return sites.every((s) => isCompleted(s));
   }, [sites, choice]);
 
-  // -----------------------------
-  // Compute exact hits (used by Save and auto-compute after genomes load)
-  // -----------------------------
   function computeExactHitsForSites(siteArr) {
     const all = {};
+
     siteArr.forEach((site) => {
       const rc = revComp(site);
       const L = site.length;
@@ -409,14 +322,12 @@ export default function Step4ReportedSites() {
         if (!g.sequence) return;
         const seq = g.sequence;
 
-        // + strand
         let i = seq.indexOf(site);
         while (i !== -1) {
           all[site].push({ type: "exact", site, match: site, start: i, end: i + L - 1, acc: g.acc, strand: "+" });
           i = seq.indexOf(site, i + 1);
         }
 
-        // - strand
         let j = seq.indexOf(rc);
         while (j !== -1) {
           all[site].push({ type: "exact", site, match: rc, start: j, end: j + L - 1, acc: g.acc, strand: "-" });
@@ -430,11 +341,6 @@ export default function Step4ReportedSites() {
     return all;
   }
 
-  // -----------------------------
-  // SAVE: parse sites + compute hits (or wait and auto-compute later)
-  // Requirement #2: do NOT force waiting. Let user save anytime.
-  // Requirement #8: show exact accordion only after Save.
-  // -----------------------------
   function handleSave() {
     const arr = rawSites
       .split(/\r?\n/g)
@@ -443,41 +349,33 @@ export default function Step4ReportedSites() {
 
     setSites(arr);
     setHasSaved(true);
-    autoComputedRef.current = true;
 
-    // reset choices & fuzzy
     const ch = {};
     arr.forEach((s) => (ch[s] = null));
     setChoice(ch);
+
     setFuzzyHits({});
     setShowFuzzy(false);
     setActiveSite(arr[0] || null);
 
-    // If genomes are available, compute now; otherwise compute when genomes finish loading.
-    const hasAnyGenomeSeq = genomes.some((g) => !!g.sequence);
-    if (hasAnyGenomeSeq) {
+    // if genomes already loaded, compute now; otherwise it will compute automatically later
+    if (genomes.some((g) => !!g.sequence)) {
       setExactHits(computeExactHitsForSites(arr));
     } else {
-      setExactHits({}); // will be computed later
+      setExactHits({});
     }
   }
 
-  // Auto-compute when genomes become available AND user already saved sites
+  // auto compute once genomes arrive
   useEffect(() => {
     if (!hasSaved) return;
     if (!sites?.length) return;
-    if (Object.keys(exactHits || {}).length > 0) return; // already computed
+    if (Object.keys(exactHits || {}).length > 0) return;
+    if (!genomes.some((g) => !!g.sequence)) return;
 
-    const hasAnyGenomeSeq = genomes.some((g) => !!g.sequence);
-    if (!hasAnyGenomeSeq) return;
-
-    // compute once after genomes are ready
     setExactHits(computeExactHitsForSites(sites));
   }, [genomes, hasSaved, sites, exactHits]);
 
-  // -----------------------------
-  // SEARCH FUZZY (1–2 mismatches)
-  // -----------------------------
   function findFuzzy(site) {
     const L = site.length;
     const rc = revComp(site);
@@ -509,9 +407,6 @@ export default function Step4ReportedSites() {
     setAccordion((p) => ({ ...p, a3: true }));
   }
 
-  // -----------------------------
-  // Confirm & continue
-  // -----------------------------
   function handleConfirm() {
     if (!allCompleted) return;
 
@@ -536,12 +431,8 @@ export default function Step4ReportedSites() {
     return [sites[0]];
   }, [sites, activeSite]);
 
-  // -----------------------------
-  // UI
-  // -----------------------------
   return (
     <div className="space-y-8">
-      {/* Status (no emojis) */}
       <div className="text-sm">
         {loadingGenomes ? (
           <span className="text-blue-300">{genomeMsg || "Loading genome data..."}</span>
@@ -550,7 +441,7 @@ export default function Step4ReportedSites() {
         )}
       </div>
 
-      {/* ACCORDION 1 — INPUT */}
+      {/* ACCORDION 1 */}
       <div className="bg-surface border border-border rounded p-4">
         <button className="flex justify-between w-full font-semibold mb-3" onClick={() => toggleAcc("a1")}>
           <span>Reported sites</span>
@@ -564,12 +455,10 @@ export default function Step4ReportedSites() {
                 <input type="radio" checked={siteType === "motif"} onChange={() => setSiteType("motif")} />
                 motif-associated (new motif)
               </label>
-
               <label className="flex items-center gap-2">
                 <input type="radio" checked={siteType === "variable"} onChange={() => setSiteType("variable")} />
                 variable motif associated
               </label>
-
               <label className="flex items-center gap-2">
                 <input type="radio" checked={siteType === "nonmotif"} onChange={() => setSiteType("nonmotif")} />
                 non-motif associated
@@ -594,7 +483,7 @@ export default function Step4ReportedSites() {
         )}
       </div>
 
-      {/* SELECTOR DE SITES (only after Save, since sites list is created) */}
+      {/* SELECT SITE */}
       {hasSaved && sites.length > 0 && (
         <div className="bg-surface border border-border rounded p-3">
           <div className="text-sm font-semibold mb-2">Select a site</div>
@@ -630,7 +519,7 @@ export default function Step4ReportedSites() {
         </div>
       )}
 
-      {/* ACCORDION 2 — EXACT MATCHES (Requirement #8: only after Save) */}
+      {/* ACCORDION 2 — only after Save */}
       {hasSaved && (
         <div className="bg-surface border border-border rounded p-4">
           <button className="flex justify-between w-full font-semibold mb-3" onClick={() => toggleAcc("a2")}>
@@ -640,22 +529,17 @@ export default function Step4ReportedSites() {
 
           {accordion.a2 && (
             <div className="space-y-4 text-sm">
-              {/* If genomes not loaded yet or exactHits not computed */}
               {Object.keys(exactHits || {}).length === 0 ? (
-                <div className="text-xs text-muted">
-                  Matches will appear once genome data is available.
-                </div>
+                <div className="text-xs text-muted">Matches will appear once genome data is available.</div>
               ) : (
                 visibleSites.map((site) => {
                   const arr = exactHits[site] || [];
-
                   return (
                     <div key={site} className="border border-border rounded p-3 space-y-2">
                       <div className="font-semibold text-accent">{site}</div>
 
                       {arr.map((hit, i) => {
                         if (hit === "none") return null;
-
                         const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
 
                         return (
@@ -675,7 +559,6 @@ export default function Step4ReportedSites() {
                                 {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
                               </div>
 
-                              {/* Requirement #3 & #7: always show at least anchor gene info (if genome has genes) */}
                               {nearby.length > 0 && (
                                 <table className="mt-1 text-[11px]">
                                   <thead>
@@ -729,7 +612,7 @@ export default function Step4ReportedSites() {
         </div>
       )}
 
-      {/* ACCORDION 3 — MISMATCHES */}
+      {/* ACCORDION 3 */}
       {hasSaved && showFuzzy && (
         <div className="bg-surface border border-border rounded p-4">
           <button className="flex justify-between w-full font-semibold mb-3" onClick={() => toggleAcc("a3")}>
@@ -749,7 +632,6 @@ export default function Step4ReportedSites() {
 
                     {arr.map((hit, i) => {
                       if (hit === "none") return null;
-
                       const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
 
                       return (
@@ -764,7 +646,6 @@ export default function Step4ReportedSites() {
                               setActiveSite(site);
                             }}
                           />
-
                           <div>
                             <div className="font-mono whitespace-pre leading-4">
                               {hit.site}
@@ -825,7 +706,6 @@ export default function Step4ReportedSites() {
         </div>
       )}
 
-      {/* Confirm */}
       {hasSaved && (
         <button className="btn mt-6" onClick={handleConfirm} disabled={!allCompleted} title={!allCompleted ? "Complete all sites first" : ""}>
           Confirm and continue →
