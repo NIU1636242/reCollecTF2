@@ -3,9 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCuration } from "../../context/CurationContext";
 import genbankParser from "genbank-parser";
 
-// =======================================================
+// -----------------------------
 // Small sequence helpers
-// =======================================================
+// -----------------------------
 function revComp(seq) {
   const map = { A: "T", T: "A", C: "G", G: "C" };
   return seq
@@ -28,103 +28,122 @@ function buildBars(a, b) {
     .join("");
 }
 
-// =======================================================
-// NCBI + Proxy helpers (same style as Step1/Step2)
-// =======================================================
-const PROXY = "https://corsproxy.io/?";
-const NCBI_EFETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi";
+// -----------------------------
+// Networking helpers (CORS-safe)
+// -----------------------------
+const NCBI = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi";
 
-function buildNcbiEfetchUrl({ db = "nuccore", id, rettype, retmode = "text" }) {
-  const u = new URL(NCBI_EFETCH);
+function buildNcbiUrl({ db = "nuccore", id, rettype, retmode = "text" }) {
+  const u = new URL(NCBI);
   u.searchParams.set("db", db);
   u.searchParams.set("id", id);
   u.searchParams.set("rettype", rettype);
   u.searchParams.set("retmode", retmode);
-  // opcional, pero útil para NCBI:
-  u.searchParams.set("tool", "reCollectTF2");
   return u.toString();
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+function proxify(url, proxyKind) {
+  const enc = encodeURIComponent(url);
 
-async function fetchTextViaCorsproxy(url, { timeoutMs = 20000, retryOnce = true } = {}) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  switch (proxyKind) {
+    // AllOrigins raw
+    case "allorigins":
+      return `https://api.allorigins.win/raw?url=${enc}`;
 
-  try {
-    const res = await fetch(PROXY + encodeURIComponent(url), {
-      method: "GET",
-      signal: ctrl.signal,
-      headers: { Accept: "text/plain,*/*" },
-    });
+    // corsproxy
+    case "corsproxy":
+      return `https://corsproxy.io/?${enc}`;
 
-    if (!res.ok) {
-      // A veces 403/429 es temporal: un único reintento suave.
-      if (retryOnce && (res.status === 403 || res.status === 429 || res.status >= 500)) {
-        clearTimeout(t);
-        await sleep(1200);
-        return fetchTextViaCorsproxy(url, { timeoutMs, retryOnce: false });
-      }
-      throw new Error(`HTTP ${res.status}`);
-    }
+    // isomorphic-git proxy
+    case "isomorphic":
+      return `https://cors.isomorphic-git.org/${url}`;
 
-    const txt = await res.text();
-    return txt;
-  } finally {
-    clearTimeout(t);
+    // direct is intentionally not used (GitHub Pages → NCBI will CORS-fail)
+    case "direct":
+    default:
+      return url;
   }
 }
 
-// =======================================================
-// MAIN COMPONENT
-// =======================================================
-export default function Step4ReportedSites() {
-  const {
-    genomeList,
-    step4Data,
-    setStep4Data,
-    goToNextStep,
-  } = useCuration();
+// fetch with timeout + fallback
+async function fetchTextWithFallback(originalUrl, { timeoutMs = 12000 } = {}) {
+  // IMPORTANT: avoid "direct" first to reduce CORS noise
+  const proxyOrder = ["allorigins", "corsproxy", "isomorphic"];
 
-  // Accordions open/closed
-  const [accordion, setAccordion] = useState({
-    a1: true,
-    a2: true,
-    a3: false,
-  });
+  let lastErr = null;
+
+  for (const proxy of proxyOrder) {
+    const url = proxify(originalUrl, proxy);
+
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        signal: ctrl.signal,
+        headers: { Accept: "text/plain,*/*" },
+      });
+
+      clearTimeout(t);
+
+      if (!res.ok) {
+        lastErr = new Error(`HTTP ${res.status} (${proxy})`);
+        continue;
+      }
+
+      const txt = await res.text();
+
+      // heuristic: discard HTML error pages
+      if (txt && txt.toLowerCase().includes("<html")) {
+        lastErr = new Error(`Unexpected HTML response (${proxy})`);
+        continue;
+      }
+
+      return txt;
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+      continue;
+    }
+  }
+
+  throw lastErr || new Error("Failed to download resource (all proxies failed).");
+}
+
+// -----------------------------
+// MAIN COMPONENT
+// -----------------------------
+export default function Step4ReportedSites() {
+  const { genomeList, step4Data, setStep4Data, goToNextStep } = useCuration();
+
+  // Step4 state
+  const [accordion, setAccordion] = useState({ a1: true, a2: true, a3: false });
   const toggleAcc = (k) => setAccordion((p) => ({ ...p, [k]: !p[k] }));
 
-  // User input
   const [siteType, setSiteType] = useState("variable");
   const [rawSites, setRawSites] = useState("");
-
-  // Sites + hits
   const [sites, setSites] = useState([]);
   const [exactHits, setExactHits] = useState({});
   const [fuzzyHits, setFuzzyHits] = useState({});
   const [choice, setChoice] = useState({});
   const [showFuzzy, setShowFuzzy] = useState(false);
-
-  // Selector
   const [activeSite, setActiveSite] = useState(null);
 
-  // Gate: accordion2 only after Save
+  // Requirement #8: exact accordion shown only after Save
   const [hasSaved, setHasSaved] = useState(false);
 
-  // Genomes
+  // Genomes local state
   const [genomes, setGenomes] = useState([]);
   const [loadingGenomes, setLoadingGenomes] = useState(false);
-  const [loadError, setLoadError] = useState("");
+  const [genomeMsg, setGenomeMsg] = useState("");
 
-  // cache (memory + localStorage)
-  const memCacheRef = useRef(new Map()); // acc -> { sequence, genes }
-  const LS_PREFIX = "recollecttf2_step4_genome_";
+  // Cache in memory: accession -> {sequence, genes}
+  const genomeCacheRef = useRef(new Map());
 
-  // =======================================================
-  // Restore state
-  // =======================================================
+  // -----------------------------
+  // RESTORE state when coming back
+  // -----------------------------
   useEffect(() => {
     if (!step4Data) return;
 
@@ -135,8 +154,12 @@ export default function Step4ReportedSites() {
     setFuzzyHits(step4Data.fuzzyHits || {});
     setChoice(step4Data.choice || {});
     setShowFuzzy(step4Data.showFuzzy || false);
-    setActiveSite(step4Data.activeSite || (step4Data.sites?.[0] ?? null));
-    setHasSaved(!!(step4Data.sites && step4Data.sites.length));
+
+    const restoredSites = step4Data.sites || [];
+    setActiveSite(step4Data.activeSite || restoredSites[0] || null);
+
+    // if we already have sites, we consider Save was done
+    setHasSaved(!!restoredSites.length);
   }, [step4Data]);
 
   useEffect(() => {
@@ -147,86 +170,62 @@ export default function Step4ReportedSites() {
     setActiveSite((prev) => (prev && sites.includes(prev) ? prev : sites[0]));
   }, [sites]);
 
-  // =======================================================
-  // Load genomes (FASTA + GenBank)
-  //  - uses rettype=gb (NOT gbwithparts) to reduce size
-  //  - product always from /product
-  // =======================================================
+  // -----------------------------
+  // LOAD GENOMES (FASTA + GENBANK)
+  // -----------------------------
   useEffect(() => {
     if (!genomeList || genomeList.length === 0) return;
 
     let cancelled = false;
 
-    async function loadAll() {
+    async function load() {
       setLoadingGenomes(true);
-      setLoadError("");
+      setGenomeMsg("Loading genomes from NCBI...");
 
       const out = [];
-
-      // Gentle throttling to reduce proxy bans
-      const THROTTLE_MS = 450;
-
       for (const g of genomeList) {
         const acc = g.accession;
         if (!acc) continue;
 
-        // memory cache
-        if (memCacheRef.current.has(acc)) {
-          out.push({ acc, ...memCacheRef.current.get(acc) });
+        // cache hit
+        if (genomeCacheRef.current.has(acc)) {
+          out.push({ acc, ...genomeCacheRef.current.get(acc) });
           continue;
         }
 
-        // localStorage cache
         try {
-          const ls = localStorage.getItem(LS_PREFIX + acc);
-          if (ls) {
-            const parsed = JSON.parse(ls);
-            if (parsed?.sequence && Array.isArray(parsed?.genes)) {
-              memCacheRef.current.set(acc, { sequence: parsed.sequence, genes: parsed.genes });
-              out.push({ acc, sequence: parsed.sequence, genes: parsed.genes });
-              continue;
-            }
-          }
-        } catch {
-          // ignore cache parse errors
-        }
-
-        try {
-          // FASTA (sequence)
-          const fastaUrl = buildNcbiEfetchUrl({
+          const fastaUrl = buildNcbiUrl({
             db: "nuccore",
             id: acc,
             rettype: "fasta",
             retmode: "text",
           });
+          const fastaText = await fetchTextWithFallback(fastaUrl);
 
-          const fastaText = await fetchTextViaCorsproxy(fastaUrl);
           const seq = fastaText
             .replace(/>.*/g, "")
             .replace(/[^ATCGatcg]/g, "")
             .toUpperCase();
 
-          if (!seq || seq.length < 50) {
-            throw new Error("FASTA response is empty or invalid.");
+          if (!seq || seq.length < 100) {
+            throw new Error(`Empty/invalid FASTA for ${acc}`);
           }
 
-          await sleep(THROTTLE_MS);
-
-          // GenBank (features) - IMPORTANT: gb (not gbwithparts)
-          const gbUrl = buildNcbiEfetchUrl({
+          // Keep your original (working) choice: gbwithparts
+          const gbUrl = buildNcbiUrl({
             db: "nuccore",
             id: acc,
-            rettype: "gb",
+            rettype: "gbwithparts",
             retmode: "text",
           });
+          const gbText = await fetchTextWithFallback(gbUrl);
 
-          const gbText = await fetchTextViaCorsproxy(gbUrl);
-
-          const parsedGb = genbankParser(gbText);
-          const entry = parsedGb?.[0];
+          const parsed = genbankParser(gbText);
+          const entry = parsed?.[0];
           const features = entry?.features || [];
 
-          // Merge by locus_tag; product ALWAYS from /product (prefer CDS)
+          // Merge gene + CDS by locus_tag
+          // Requirement #6: ALWAYS use /product (never /function)
           const locusMap = new Map();
 
           for (const f of features) {
@@ -236,20 +235,14 @@ export default function Step4ReportedSites() {
             if (!locus) continue;
 
             const geneName = f.notes?.gene?.[0] || "";
-
-            // IMPORTANT: product only
-            const product = f.notes?.product?.[0] || "";
-
-            // start/end might be 0/1 based depending on parser; you were using it as-is before.
-            // We keep it consistent with your previous logic.
+            const product = f.notes?.product?.[0] || ""; // <-- ONLY product
             const start = f.start;
             const end = f.end;
 
-            // strand in genbank-parser: often 1/-1 or "+" / "-"
-            const rawStrand = f.strand;
+            // strand (genbank-parser usually provides 1/-1; normalize)
             const strand =
-              rawStrand === -1 || rawStrand === "-" ? "-" :
-              rawStrand === 1 || rawStrand === "+" ? "+" :
+              f.strand === -1 || f.strand === "-" ? "-" :
+              f.strand === 1 || f.strand === "+" ? "+" :
               "";
 
             if (!locusMap.has(locus)) {
@@ -264,13 +257,12 @@ export default function Step4ReportedSites() {
               });
             } else {
               const existing = locusMap.get(locus);
-
               existing.start = Math.min(existing.start, start);
               existing.end = Math.max(existing.end, end);
 
               if (!existing.gene && geneName) existing.gene = geneName;
 
-              // prefer CDS product
+              // prefer CDS product if present
               if (f.type === "CDS" && product) {
                 existing.product = product;
                 existing.hasCDS = true;
@@ -278,70 +270,67 @@ export default function Step4ReportedSites() {
                 existing.product = product;
               }
 
-              // prefer explicit strand if missing
               if (!existing.strand && strand) existing.strand = strand;
             }
           }
 
-          const genes = Array.from(locusMap.values()).sort((a, b) => a.start - b.start);
+          const genes = Array.from(locusMap.values()).sort(
+            (a, b) => a.start - b.start
+          );
 
           const payload = { sequence: seq, genes };
-          memCacheRef.current.set(acc, payload);
-
-          try {
-            localStorage.setItem(LS_PREFIX + acc, JSON.stringify(payload));
-          } catch {
-            // localStorage may be full; ignore
-          }
+          genomeCacheRef.current.set(acc, payload);
 
           out.push({ acc, ...payload });
-        } catch (e) {
-          console.error("Error loading genome:", acc, e);
-          out.push({ acc, sequence: "", genes: [], error: String(e?.message || e) });
-
-          // Do not spam retries. Just continue.
+        } catch (err) {
+          console.error("Error loading genome:", acc, err);
+          out.push({
+            acc,
+            sequence: "",
+            genes: [],
+            error: String(err?.message || err),
+          });
         }
-
-        await sleep(THROTTLE_MS);
       }
 
       if (cancelled) return;
 
       setGenomes(out);
-      setLoadingGenomes(false);
 
-      const failed = out.filter((x) => !x.sequence).length;
-      if (failed > 0) {
-        setLoadError(
-          `Some genomes could not be loaded (${failed}). This is usually a temporary proxy (HTTP 403/429) limitation. Try again later or reduce the number of genomes.`
-        );
+      const bad = out.filter((x) => !x.sequence).length;
+      if (bad > 0) {
+        setGenomeMsg(`Loaded ${out.length} genomes. ${bad} failed (see console).`);
+      } else {
+        setGenomeMsg(`Loaded ${out.length} genomes successfully.`);
       }
+
+      setLoadingGenomes(false);
     }
 
-    loadAll();
+    load();
 
     return () => {
       cancelled = true;
     };
   }, [genomeList]);
 
-  // =======================================================
-  // Given a hit, find genes:
-  //   - ALWAYS pick the FIRST gene to the RIGHT (start >= hitEnd)
-  //   - if none exists (site after last gene), use the last gene
-  //   - then expand left/right while neighbor gaps <= 150
-  // =======================================================
+  // -----------------------------
+  // GIVEN A HIT, FIND NEARBY GENES
+  // Requirement #3:
+  //   - anchor = FIRST gene to the RIGHT (gene.start >= hitEnd)
+  //   - if none, anchor = last gene
+  //   - then expand left/right if neighbor gap <= 150
+  //   - ALWAYS return at least the anchor gene (if genes exist)
+  // -----------------------------
   function findGenesForHit(acc, hitStart, hitEnd) {
     const genome = genomes.find((g) => g.acc === acc);
     if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
-    const genes = genome.genes; // sorted by start
+    const genes = genome.genes;
 
-    // 1) first gene to the right
+    // anchor: first gene to the right
     let anchorIdx = genes.findIndex((g) => g.start >= hitEnd);
-
-    // if none to the right, use last gene
-    if (anchorIdx === -1) anchorIdx = genes.length - 1;
+    if (anchorIdx === -1) anchorIdx = genes.length - 1; // site after last gene
 
     const result = [];
     const pushUnique = (g) => {
@@ -357,21 +346,21 @@ export default function Step4ReportedSites() {
       }
     };
 
-    // 2) add anchor
+    // always include anchor
     pushUnique(genes[anchorIdx]);
 
-    // 3) expand left (neighbor gap <= 150)
+    // expand left: neighbor gap <= 150
     let i = anchorIdx - 1;
     while (i >= 0) {
       const current = genes[i];
       const next = genes[i + 1];
-      const gap = next.start - current.end; // if negative => overlap
+      const gap = next.start - current.end; // negative => overlap
       if (gap > 150) break;
       pushUnique(current);
       i--;
     }
 
-    // 4) expand right
+    // expand right
     i = anchorIdx + 1;
     while (i < genes.length) {
       const prev = genes[i - 1];
@@ -385,12 +374,14 @@ export default function Step4ReportedSites() {
     return result;
   }
 
-  // =======================================================
-  // Completion
-  // =======================================================
+  // -----------------------------
+  // Completion rules
+  // -----------------------------
   function isCompleted(site) {
     const c = choice?.[site];
-    return typeof c === "string" && (c.startsWith("ex-") || c.startsWith("fz-"));
+    return (
+      typeof c === "string" && (c.startsWith("ex-") || c.startsWith("fz-"))
+    );
   }
 
   const allCompleted = useMemo(() => {
@@ -398,15 +389,9 @@ export default function Step4ReportedSites() {
     return sites.every((s) => isCompleted(s));
   }, [sites, choice]);
 
-  const visibleSites = useMemo(() => {
-    if (!sites?.length) return [];
-    if (activeSite && sites.includes(activeSite)) return [activeSite];
-    return [sites[0]];
-  }, [sites, activeSite]);
-
-  // =======================================================
-  // Search exact
-  // =======================================================
+  // -----------------------------
+  // SEARCH EXACT
+  // -----------------------------
   function findExact() {
     const arr = rawSites
       .split(/\r?\n/g)
@@ -414,7 +399,7 @@ export default function Step4ReportedSites() {
       .filter(Boolean);
 
     setSites(arr);
-    setHasSaved(true);
+    setHasSaved(true); // Requirement #8: enable exact accordion now
 
     const all = {};
 
@@ -427,7 +412,6 @@ export default function Step4ReportedSites() {
         if (!g.sequence) return;
         const seq = g.sequence;
 
-        // + strand
         let i = seq.indexOf(site);
         while (i !== -1) {
           all[site].push({
@@ -442,7 +426,6 @@ export default function Step4ReportedSites() {
           i = seq.indexOf(site, i + 1);
         }
 
-        // - strand
         let j = seq.indexOf(rc);
         while (j !== -1) {
           all[site].push({
@@ -471,12 +454,11 @@ export default function Step4ReportedSites() {
     setShowFuzzy(false);
 
     setActiveSite(arr[0] || null);
-    setAccordion((p) => ({ ...p, a2: true }));
   }
 
-  // =======================================================
-  // Search fuzzy (1–2 mismatches)
-  // =======================================================
+  // -----------------------------
+  // SEARCH FUZZY (1–2 mismatches)
+  // -----------------------------
   function findFuzzy(site) {
     const L = site.length;
     const rc = revComp(site);
@@ -526,9 +508,9 @@ export default function Step4ReportedSites() {
     setAccordion((p) => ({ ...p, a3: true }));
   }
 
-  // =======================================================
+  // -----------------------------
   // Confirm & continue
-  // =======================================================
+  // -----------------------------
   function handleConfirm() {
     if (!allCompleted) return;
 
@@ -541,24 +523,27 @@ export default function Step4ReportedSites() {
       choice,
       showFuzzy,
       activeSite,
+      // also store hasSaved
+      hasSaved: true,
     });
 
     goToNextStep();
   }
 
-  // =======================================================
+  const visibleSites = useMemo(() => {
+    if (!sites?.length) return [];
+    if (activeSite && sites.includes(activeSite)) return [activeSite];
+    return [sites[0]];
+  }, [sites, activeSite]);
+
+  // -----------------------------
   // UI
-  // =======================================================
+  // -----------------------------
   return (
     <div className="space-y-8">
-      {/* Load status (no emojis) */}
-      <div className="text-sm">
-        {loadingGenomes ? (
-          <span className="text-muted">Loading genome data from NCBI…</span>
-        ) : (
-          <span className="text-muted">Genome data loaded.</span>
-        )}
-        {loadError && <div className="mt-1 text-xs text-red-400">{loadError}</div>}
+      {/* Load status (Requirement #4: no emojis) */}
+      <div className="text-sm text-muted">
+        {loadingGenomes ? "Loading genome data..." : genomeMsg || "Genomes ready."}
       </div>
 
       {/* ACCORDION 1 — INPUT */}
@@ -609,7 +594,7 @@ export default function Step4ReportedSites() {
               onChange={(e) => setRawSites(e.target.value)}
             />
 
-            {/* Requirement #2: no “wait until loaded” gating */}
+            {/* Requirement #2: no “wait for genomes” gating */}
             <button className="btn" onClick={findExact}>
               Save
             </button>
@@ -617,8 +602,8 @@ export default function Step4ReportedSites() {
         )}
       </div>
 
-      {/* Site selector only after Save (because sites come from Save) */}
-      {hasSaved && sites.length > 0 && (
+      {/* SELECT A SITE */}
+      {sites.length > 0 && (
         <div className="bg-surface border border-border rounded p-3">
           <div className="text-sm font-semibold mb-2">Select a site</div>
 
@@ -627,17 +612,22 @@ export default function Step4ReportedSites() {
               const selected = activeSite === s;
               const done = isCompleted(s);
 
+              // Requirement #5: better palette than grey
+              const base =
+                "w-full text-left px-3 py-2 text-sm border-b last:border-b-0 hover:bg-muted/40";
+              const selectedCls =
+                "bg-accent/10 ring-1 ring-inset ring-accent/30";
+              const doneCls = "text-green-400 font-semibold";
+
               return (
                 <button
                   key={s}
                   type="button"
                   onClick={() => setActiveSite(s)}
                   className={[
-                    "w-full text-left px-3 py-2 text-sm border-b last:border-b-0",
-                    "hover:bg-muted/40",
-                    // Requirement #5: better palette than grey
-                    selected ? "bg-accent/10 ring-1 ring-inset ring-accent/30" : "",
-                    done ? "text-green-400 font-semibold" : "text-foreground",
+                    base,
+                    selected ? selectedCls : "",
+                    done ? doneCls : "",
                   ].join(" ")}
                 >
                   {s}
@@ -654,7 +644,7 @@ export default function Step4ReportedSites() {
         </div>
       )}
 
-      {/* Requirement #8: Exact matches accordion hidden until Save */}
+      {/* ACCORDION 2 — EXACT MATCHES (Requirement #8) */}
       {hasSaved && (
         <div className="bg-surface border border-border rounded p-4">
           <button
@@ -703,10 +693,11 @@ export default function Step4ReportedSites() {
                           />
                           <div>
                             <div className="font-mono">
-                              {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                              {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}]{" "}
+                              {hit.acc}
                             </div>
 
-                            {/* Requirement #3 + #7: ALWAYS show genes list (right-anchor + chain) */}
+                            {/* Requirement #6 + #7 */}
                             {nearby.length > 0 && (
                               <table className="mt-1 text-[11px]">
                                 <thead>
@@ -814,7 +805,8 @@ export default function Step4ReportedSites() {
                               {"\n"}
                               {hit.bars}
                               {"\n"}
-                              {hit.match} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                              {hit.match} {hit.strand}[{hit.start + 1},{hit.end + 1}]{" "}
+                              {hit.acc}
                             </div>
 
                             {nearby.length > 0 && (
