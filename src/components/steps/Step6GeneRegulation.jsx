@@ -197,7 +197,7 @@ export default function Step6GeneRegulation() {
                   className={[
                     "w-full text-left px-3 py-2 text-sm border-b last:border-b-0",
                     "hover:bg-muted",
-                    selected ? "bg-muted/60" : "",
+                    selected ? "bg-accent text-black" : "hover:bg-muted text-gray-300",
                     !hasHit ? "opacity-60" : "",
                   ].join(" ")}
                   title={!hasHit ? "No selected genomic mapping in Step 4" : ""}

@@ -529,7 +529,7 @@ export default function Step4ReportedSites() {
                   onClick={() => setActiveSite(s)}
                   className={[
                     "w-full text-left px-3 py-2 text-sm border-b last:border-b-0 transition-colors",
-                    selected ? "bg-gray-800 border-gray-700 text-blue-300" : "hover:bg-muted",
+                    selected ? "bg-accent text-black border border-accent" : "hover:bg-muted text-gray-300",
                     done ? "text-emerald-300 font-semibold" : "",
                   ].join(" ")}
                 >
