@@ -42,44 +42,28 @@ function buildNcbiUrl({ db = "nuccore", id, rettype, retmode = "text" }) {
   return u.toString();
 }
 
-// Proxies alternativos (si uno cae, probamos el siguiente)
 function proxify(url, proxyKind) {
   const enc = encodeURIComponent(url);
-
   switch (proxyKind) {
     case "direct":
       return url;
-
-    // AllOrigins raw (suele funcionar bien)
     case "allorigins":
       return `https://api.allorigins.win/raw?url=${enc}`;
-
-    // isomorphic-git CORS proxy
     case "isomorphic":
       return `https://cors.isomorphic-git.org/${url}`;
-
-    // whateverorigin (a veces funciona)
-    case "whateverorigin":
-      return `https://www.whateverorigin.org/get?url=${enc}&callback=?`;
-
-    // fallback antiguo (por si vuelve a funcionar)
     case "corsproxy":
       return `https://corsproxy.io/?${enc}`;
-
     default:
       return url;
   }
 }
 
-// fetch con timeout + fallback
 async function fetchTextWithFallback(originalUrl, { timeoutMs = 12000 } = {}) {
-  const proxyOrder = ["direct", "allorigins", "isomorphic", "corsproxy"]; // puedes reordenar
-
+  const proxyOrder = ["direct", "allorigins", "isomorphic", "corsproxy"];
   let lastErr = null;
 
   for (const proxy of proxyOrder) {
     const url = proxify(originalUrl, proxy);
-
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
 
@@ -87,16 +71,10 @@ async function fetchTextWithFallback(originalUrl, { timeoutMs = 12000 } = {}) {
       const res = await fetch(url, {
         method: "GET",
         signal: ctrl.signal,
-        headers: {
-          // NCBI no exige, pero ayuda a algunos proxies
-          "Accept": "text/plain,*/*",
-        },
+        headers: { Accept: "text/plain,*/*" },
       });
 
       clearTimeout(t);
-
-      // whateverorigin devuelve JSONP: lo evitamos por simplicidad
-      if (proxy === "whateverorigin") continue;
 
       if (!res.ok) {
         lastErr = new Error(`HTTP ${res.status} (${proxy})`);
@@ -105,9 +83,8 @@ async function fetchTextWithFallback(originalUrl, { timeoutMs = 12000 } = {}) {
 
       const txt = await res.text();
 
-      // Heurística: si recibimos HTML de error / proxy, lo descartamos
       if (txt && txt.toLowerCase().includes("<html")) {
-        lastErr = new Error(`Respuesta HTML inesperada (${proxy})`);
+        lastErr = new Error(`Unexpected HTML response (${proxy})`);
         continue;
       }
 
@@ -119,24 +96,20 @@ async function fetchTextWithFallback(originalUrl, { timeoutMs = 12000 } = {}) {
     }
   }
 
-  throw lastErr || new Error("No se pudo descargar el recurso (todos los proxies fallaron).");
+  throw lastErr || new Error("Failed to download resource (all proxies failed).");
 }
 
 // -----------------------------
 // MAIN COMPONENT
 // -----------------------------
 export default function Step4ReportedSites() {
-  const {
-    genomeList,
-    step4Data,
-    setStep4Data,
-    goToNextStep,
-  } = useCuration();
+  const { genomeList, step4Data, setStep4Data, goToNextStep } = useCuration();
 
-  // Step4 state
+  // UI accordion state
   const [accordion, setAccordion] = useState({ a1: true, a2: true, a3: false });
   const toggleAcc = (k) => setAccordion((p) => ({ ...p, [k]: !p[k] }));
 
+  // Step4 state
   const [siteType, setSiteType] = useState("variable");
   const [rawSites, setRawSites] = useState("");
   const [sites, setSites] = useState([]);
@@ -146,13 +119,19 @@ export default function Step4ReportedSites() {
   const [showFuzzy, setShowFuzzy] = useState(false);
   const [activeSite, setActiveSite] = useState(null);
 
-  // Genomes local state (evita depender del Context si no lo tienes)
+  // NEW: mismatch control (1 or 2)
+  const [mismatchMax, setMismatchMax] = useState(2);
+
+  // Genomes local state
   const [genomes, setGenomes] = useState([]);
   const [loadingGenomes, setLoadingGenomes] = useState(false);
   const [genomeMsg, setGenomeMsg] = useState("");
 
-  // Cache en memoria: accession -> {sequence, genes}
+  // Cache: accession -> {sequence, genes}
   const genomeCacheRef = useRef(new Map());
+
+  // Flag: only show "Exact site matches" AFTER Save (requirement #7)
+  const hasSaved = sites.length > 0;
 
   // -----------------------------
   // RESTORE state when coming back
@@ -167,6 +146,7 @@ export default function Step4ReportedSites() {
     setFuzzyHits(step4Data.fuzzyHits || {});
     setChoice(step4Data.choice || {});
     setShowFuzzy(step4Data.showFuzzy || false);
+    setMismatchMax(step4Data.mismatchMax ?? 2);
 
     const restoredSites = step4Data.sites || [];
     setActiveSite(step4Data.activeSite || restoredSites[0] || null);
@@ -183,6 +163,15 @@ export default function Step4ReportedSites() {
   // -----------------------------
   // LOAD GENOMES (FASTA + GENBANK)
   // -----------------------------
+  function inferStrand(feature) {
+    // genbank-parser commonly exposes .strand as 1 / -1
+    if (feature?.strand === -1 || feature?.strand === "-" || feature?.complement === true) return "-";
+    // Some parsers store "complement(...)" in location string (best-effort)
+    const loc = String(feature?.location || "");
+    if (loc.toLowerCase().includes("complement")) return "-";
+    return "+";
+  }
+
   useEffect(() => {
     if (!genomeList || genomeList.length === 0) return;
 
@@ -197,7 +186,6 @@ export default function Step4ReportedSites() {
         const acc = g.accession;
         if (!acc) continue;
 
-        // cache hit
         if (genomeCacheRef.current.has(acc)) {
           out.push({ acc, ...genomeCacheRef.current.get(acc) });
           continue;
@@ -213,7 +201,7 @@ export default function Step4ReportedSites() {
             .toUpperCase();
 
           if (!seq || seq.length < 100) {
-            throw new Error(`FASTA vacío o inválido para ${acc}`);
+            throw new Error(`Empty/invalid FASTA for ${acc}`);
           }
 
           const gbUrl = buildNcbiUrl({ db: "nuccore", id: acc, rettype: "gbwithparts", retmode: "text" });
@@ -223,8 +211,10 @@ export default function Step4ReportedSites() {
           const entry = parsed?.[0];
           const features = entry?.features || [];
 
-          // Merge gene + CDS por locus_tag, prefiriendo CDS function/product
+          // Merge gene + CDS by locus_tag
+          // IMPORTANT (#5): Always use /product (never /function)
           const locusMap = new Map();
+
           for (const f of features) {
             if (f.type !== "gene" && f.type !== "CDS") continue;
 
@@ -232,32 +222,39 @@ export default function Step4ReportedSites() {
             if (!locus) continue;
 
             const geneName = f.notes?.gene?.[0] || "";
-            const func = f.notes?.function?.[0] || f.notes?.product?.[0] || "";
+            const product = f.notes?.product?.[0] || ""; // <- ALWAYS product
             const start = f.start;
             const end = f.end;
+            const strand = inferStrand(f);
 
             if (!locusMap.has(locus)) {
               locusMap.set(locus, {
                 locus,
                 gene: geneName,
-                function: func,
+                product,
                 start,
                 end,
+                strand,
                 hasCDS: f.type === "CDS",
               });
             } else {
               const existing = locusMap.get(locus);
+
               existing.start = Math.min(existing.start, start);
               existing.end = Math.max(existing.end, end);
 
               if (!existing.gene && geneName) existing.gene = geneName;
 
-              if (f.type === "CDS" && func) {
-                existing.function = func;
+              // Prefer CDS product if present
+              if (f.type === "CDS" && product) {
+                existing.product = product;
                 existing.hasCDS = true;
-              } else if (!existing.function && func) {
-                existing.function = func;
+              } else if (!existing.product && product) {
+                existing.product = product;
               }
+
+              // Prefer explicit strand info from gene/CDS if missing (best-effort)
+              if (!existing.strand && strand) existing.strand = strand;
             }
           }
 
@@ -279,7 +276,7 @@ export default function Step4ReportedSites() {
 
       const bad = out.filter((x) => !x.sequence).length;
       if (bad > 0) {
-        setGenomeMsg(`Loaded ${out.length} genomes. ⚠️ ${bad} failed (see console).`);
+        setGenomeMsg(`Loaded ${out.length} genomes. ${bad} failed (see console).`);
       } else {
         setGenomeMsg(`Loaded ${out.length} genomes successfully.`);
       }
@@ -295,61 +292,70 @@ export default function Step4ReportedSites() {
   }, [genomeList]);
 
   // -----------------------------
-  // GIVEN A HIT, FIND NEARBY GENES (±150 between genes chain)
+  // GIVEN A HIT, FIND NEARBY GENES
+  // IMPORTANT (#2):
+  // - Always anchor on the FIRST gene to the RIGHT of the site (gene.start >= hitEnd)
+  // - Even if far away, ALWAYS show that anchor gene
+  // - Then expand left/right while gaps <= 150 ("gene chain")
+  // - Also show start/end + strand in UI (#6)
   // -----------------------------
-  function findGenesForHit(acc, hitStart, hitEnd) {
+  function findGenesForHit(acc, hitStart1, hitEnd1) {
     const genome = genomes.find((g) => g.acc === acc);
     if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
     const genes = genome.genes;
 
-    const distToSite = (gene) => {
-      if (hitEnd < gene.start) return gene.start - hitEnd;
-      if (hitStart > gene.end) return hitStart - gene.end;
-      return 0;
-    };
+    // Convert to same coordinate system:
+    // - hitStart1/hitEnd1 are 1-based inclusive
+    // - genes start/end from parser are assumed 1-based; if not, still works relatively
+    const hitEnd = hitEnd1;
 
-    let bestIdx = -1;
-    let bestDist = Infinity;
-    genes.forEach((g, idx) => {
-      const d = distToSite(g);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = idx;
-      }
-    });
-
-    if (bestIdx === -1 || bestDist > 150) return [];
+    // Anchor: first gene with start >= hitEnd (to the right)
+    let anchorIdx = genes.findIndex((g) => Number(g.start) >= Number(hitEnd));
+    if (anchorIdx === -1) anchorIdx = genes.length - 1; // if site beyond last gene, anchor to last gene
 
     const result = [];
     const pushUnique = (g) => {
+      if (!g) return;
       if (!result.some((r) => r.locus === g.locus)) {
-        result.push({ locus: g.locus || "", gene: g.gene || "", function: g.function || "" });
+        result.push({
+          locus: g.locus || "",
+          gene: g.gene || "",
+          product: g.product || "",
+          start: g.start,
+          end: g.end,
+          strand: g.strand || "+",
+        });
       }
     };
 
-    pushUnique(genes[bestIdx]);
+    // Always include anchor gene (even if far)
+    pushUnique(genes[anchorIdx]);
 
-    let i = bestIdx - 1;
+    // Expand left by chain-gap rule
+    let i = anchorIdx - 1;
     while (i >= 0) {
       const current = genes[i];
       const next = genes[i + 1];
-      const gap = next.start - current.end;
+      const gap = Number(next.start) - Number(current.end);
       if (gap > 150) break;
       pushUnique(current);
       i--;
     }
 
-    i = bestIdx + 1;
+    // Expand right by chain-gap rule
+    i = anchorIdx + 1;
     while (i < genes.length) {
       const prev = genes[i - 1];
       const current = genes[i];
-      const gap = current.start - prev.end;
+      const gap = Number(current.start) - Number(prev.end);
       if (gap > 150) break;
       pushUnique(current);
       i++;
     }
 
+    // Keep sorted by coordinate for readability
+    result.sort((a, b) => Number(a.start) - Number(b.start));
     return result;
   }
 
@@ -390,13 +396,29 @@ export default function Step4ReportedSites() {
 
         let i = seq.indexOf(site);
         while (i !== -1) {
-          all[site].push({ type: "exact", site, match: site, start: i, end: i + L - 1, acc: g.acc, strand: "+" });
+          all[site].push({
+            type: "exact",
+            site,
+            match: site,
+            start: i,
+            end: i + L - 1,
+            acc: g.acc,
+            strand: "+",
+          });
           i = seq.indexOf(site, i + 1);
         }
 
         let j = seq.indexOf(rc);
         while (j !== -1) {
-          all[site].push({ type: "exact", site, match: rc, start: j, end: j + L - 1, acc: g.acc, strand: "-" });
+          all[site].push({
+            type: "exact",
+            site,
+            match: rc,
+            start: j,
+            end: j + L - 1,
+            acc: g.acc,
+            strand: "-",
+          });
           j = seq.indexOf(rc, j + 1);
         }
       });
@@ -412,8 +434,10 @@ export default function Step4ReportedSites() {
 
     setFuzzyHits({});
     setShowFuzzy(false);
-
     setActiveSite(arr[0] || null);
+
+    // IMPORTANT (#7): keep exact accordion closed/open as user wants, but now it will appear only after Save
+    setAccordion((p) => ({ ...p, a2: true }));
   }
 
   // -----------------------------
@@ -432,13 +456,33 @@ export default function Step4ReportedSites() {
         const sub = seq.slice(i, i + L);
 
         const mmF = mismatches(sub, site);
-        if (mmF > 0 && mmF <= 2) {
-          found.push({ type: "fuzzy", site, match: sub, bars: buildBars(site, sub), start: i, end: i + L - 1, acc: g.acc, strand: "+" });
+        if (mmF > 0 && mmF <= mismatchMax) {
+          found.push({
+            type: "fuzzy",
+            site,
+            match: sub,
+            bars: buildBars(site, sub),
+            start: i,
+            end: i + L - 1,
+            acc: g.acc,
+            strand: "+",
+            mm: mmF,
+          });
         }
 
         const mmR = mismatches(sub, rc);
-        if (mmR > 0 && mmR <= 2) {
-          found.push({ type: "fuzzy", site, match: sub, bars: buildBars(rc, sub), start: i, end: i + L - 1, acc: g.acc, strand: "-" });
+        if (mmR > 0 && mmR <= mismatchMax) {
+          found.push({
+            type: "fuzzy",
+            site,
+            match: sub,
+            bars: buildBars(rc, sub),
+            start: i,
+            end: i + L - 1,
+            acc: g.acc,
+            strand: "-",
+            mm: mmR,
+          });
         }
       }
     });
@@ -465,6 +509,7 @@ export default function Step4ReportedSites() {
       choice,
       showFuzzy,
       activeSite,
+      mismatchMax,
     });
 
     goToNextStep();
@@ -481,12 +526,12 @@ export default function Step4ReportedSites() {
   // -----------------------------
   return (
     <div className="space-y-8">
-      {/* Load status */}
+      {/* Load status (NO emojis) */}
       <div className="text-sm">
         {loadingGenomes ? (
-          <span className="text-blue-300">⏳ {genomeMsg}</span>
+          <span className="text-blue-300">{genomeMsg || "Loading genomes..."}</span>
         ) : (
-          <span className="text-green-300">✅ {genomeMsg || "Genomes ready."}</span>
+          <span className="text-green-300">{genomeMsg || "Genomes ready."}</span>
         )}
       </div>
 
@@ -502,41 +547,52 @@ export default function Step4ReportedSites() {
             <div className="space-y-1">
               <label className="flex items-center gap-2">
                 <input type="radio" checked={siteType === "motif"} onChange={() => setSiteType("motif")} />
-                motif-associated (new motif)
+                Motif-associated (new motif)
               </label>
 
               <label className="flex items-center gap-2">
                 <input type="radio" checked={siteType === "variable"} onChange={() => setSiteType("variable")} />
-                variable motif associated
+                Variable motif-associated
               </label>
 
               <label className="flex items-center gap-2">
                 <input type="radio" checked={siteType === "nonmotif"} onChange={() => setSiteType("nonmotif")} />
-                non-motif associated
+                Non-motif-associated
               </label>
             </div>
 
             <textarea
               className="form-control w-full h-40 text-sm"
               value={rawSites}
-              placeholder="AAGATTTCTTT"
+              placeholder={"AAGATTTCTTT\nAAGATTACATT"}
               onChange={(e) => setRawSites(e.target.value)}
             />
+
+            {/* Mismatch preference */}
+            <div className="flex items-center gap-3 text-xs text-muted">
+              <span>Mismatch search limit:</span>
+              <select
+                className="form-control text-xs py-1"
+                value={mismatchMax}
+                onChange={(e) => setMismatchMax(Number(e.target.value))}
+              >
+                <option value={1}>1 mismatch</option>
+                <option value={2}>2 mismatches</option>
+              </select>
+            </div>
 
             <button className="btn" onClick={findExact} disabled={loadingGenomes || genomes.length === 0}>
               Save
             </button>
 
             {(loadingGenomes || genomes.length === 0) && (
-              <div className="text-xs text-muted">
-                Espera a que carguen los genomas antes de buscar matches.
-              </div>
+              <div className="text-xs text-muted">Please wait until genomes are loaded before searching for matches.</div>
             )}
           </div>
         )}
       </div>
 
-      {/* SELECTOR DE SITES */}
+      {/* SELECTOR OF SITES */}
       {sites.length > 0 && (
         <div className="bg-surface border border-border rounded p-3">
           <div className="text-sm font-semibold mb-2">Select a site</div>
@@ -552,10 +608,10 @@ export default function Step4ReportedSites() {
                   type="button"
                   onClick={() => setActiveSite(s)}
                   className={[
-                    "w-full text-left px-3 py-2 text-sm border-b last:border-b-0",
-                    "hover:bg-muted",
-                    selected ? "bg-muted" : "",
-                    done ? "text-green-400 font-semibold" : "",
+                    "w-full text-left px-3 py-2 text-sm border-b last:border-b-0 transition-colors",
+                    // nicer palette than grey (#4)
+                    selected ? "bg-emerald-500/15 text-emerald-100" : "hover:bg-muted",
+                    done ? "text-emerald-300 font-semibold" : "",
                   ].join(" ")}
                 >
                   {s}
@@ -566,94 +622,113 @@ export default function Step4ReportedSites() {
 
           {!allCompleted && (
             <div className="text-xs text-muted mt-2">
-              Select a valid match (exact o mismatch) para todos los sites antes de continuar.
+              Select one valid mapping (exact or mismatch) for every site before continuing.
             </div>
           )}
         </div>
       )}
 
-      {/* ACCORDION 2 — EXACT MATCHES */}
-      <div className="bg-surface border border-border rounded p-4">
-        <button className="flex justify-between w-full font-semibold mb-3" onClick={() => toggleAcc("a2")}>
-          <span>Exact site matches</span>
-          <span>{accordion.a2 ? "▲" : "▼"}</span>
-        </button>
+      {/* ACCORDION 2 — EXACT MATCHES (ONLY AFTER SAVE) */}
+      {hasSaved && (
+        <div className="bg-surface border border-border rounded p-4">
+          <button className="flex justify-between w-full font-semibold mb-3" onClick={() => toggleAcc("a2")}>
+            <span>Exact site matches</span>
+            <span>{accordion.a2 ? "▲" : "▼"}</span>
+          </button>
 
-        {accordion.a2 && (
-          <div className="space-y-4 text-sm">
-            {visibleSites.map((site) => {
-              const arr = exactHits[site] || [];
+          {accordion.a2 && (
+            <div className="space-y-4 text-sm">
+              {visibleSites.map((site) => {
+                const arr = exactHits[site] || [];
 
-              return (
-                <div key={site} className="border border-border rounded p-3 space-y-2">
-                  <div className="font-semibold text-accent">{site}</div>
+                const hasNone = arr.length === 1 && arr[0] === "none";
+                const hasAny = arr.some((x) => x !== "none");
 
-                  {arr.map((hit, i) => {
-                    if (hit === "none") return null;
+                return (
+                  <div key={site} className="border border-border rounded p-3 space-y-2">
+                    <div className="font-semibold text-accent">{site}</div>
 
-                    const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
+                    {hasNone && (
+                      <div className="text-xs text-muted">
+                        No exact matches were found in the loaded genomes for this site.
+                      </div>
+                    )}
 
-                    return (
-                      <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
-                        <input
-                          type="radio"
-                          name={`ex-${site}`}
-                          className="mt-[3px]"
-                          checked={choice[site] === `ex-${i}`}
-                          onChange={() => {
-                            setChoice((p) => ({ ...p, [site]: `ex-${i}` }));
-                            setActiveSite(site);
-                          }}
-                        />
-                        <div>
-                          <div className="font-mono">
-                            {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
-                          </div>
+                    {hasAny &&
+                      arr.map((hit, i) => {
+                        if (hit === "none") return null;
 
-                          {nearby.length > 0 && (
-                            <table className="mt-1 text-[11px]">
-                              <thead>
-                                <tr>
-                                  <th className="pr-4 text-left">locus tag</th>
-                                  <th className="pr-4 text-left">gene name</th>
-                                  <th className="pr-4 text-left">function</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {nearby.map((g, idx) => (
-                                  <tr key={idx}>
-                                    <td className="pr-4">{g.locus}</td>
-                                    <td className="pr-4">{g.gene}</td>
-                                    <td className="pr-4">{g.function || ""}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
+                        const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
 
-                  <label className="flex items-center gap-2 text-xs cursor-pointer mt-2">
-                    <input
-                      type="radio"
-                      name={`ex-${site}`}
-                      checked={choice[site] === "none"}
-                      onChange={() => {
-                        setChoice((p) => ({ ...p, [site]: "none" }));
-                        setActiveSite(site);
-                        findFuzzy(site);
-                      }}
-                    />
-                    <span>No valid exact match → search mismatches</span>
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                        return (
+                          <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
+                            <input
+                              type="radio"
+                              name={`ex-${site}`}
+                              className="mt-[3px]"
+                              checked={choice[site] === `ex-${i}`}
+                              onChange={() => {
+                                setChoice((p) => ({ ...p, [site]: `ex-${i}` }));
+                                setActiveSite(site);
+                              }}
+                            />
+                            <div className="space-y-1">
+                              <div className="font-mono">
+                                {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+                              </div>
+
+                              {/* Nearby genes table (ALWAYS anchored to the right; includes coords + strand) */}
+                              {nearby.length > 0 && (
+                                <table className="mt-1 text-[11px]">
+                                  <thead>
+                                    <tr>
+                                      <th className="pr-4 text-left">locus tag</th>
+                                      <th className="pr-4 text-left">gene</th>
+                                      <th className="pr-4 text-left">product</th>
+                                      <th className="pr-4 text-left">start</th>
+                                      <th className="pr-4 text-left">end</th>
+                                      <th className="pr-2 text-left">strand</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {nearby.map((g, idx) => (
+                                      <tr key={idx}>
+                                        <td className="pr-4">{g.locus}</td>
+                                        <td className="pr-4">{g.gene}</td>
+                                        <td className="pr-4">{g.product || ""}</td>
+                                        <td className="pr-4">{g.start}</td>
+                                        <td className="pr-4">{g.end}</td>
+                                        <td className="pr-2">{g.strand}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+
+                    <label className="flex items-center gap-2 text-xs cursor-pointer mt-2">
+                      <input
+                        type="radio"
+                        name={`ex-${site}`}
+                        checked={choice[site] === "none"}
+                        onChange={() => {
+                          setChoice((p) => ({ ...p, [site]: "none" }));
+                          setActiveSite(site);
+                          findFuzzy(site);
+                        }}
+                      />
+                      <span>No valid exact match → search mismatches</span>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ACCORDION 3 — MISMATCHES */}
       {showFuzzy && (
@@ -669,61 +744,74 @@ export default function Step4ReportedSites() {
                 const arr = fuzzyHits[site];
                 if (!arr) return null;
 
+                const hasNone = arr.length === 1 && arr[0] === "none";
+
                 return (
                   <div key={site} className="border border-border rounded p-3 space-y-2">
-                    <div className="font-semibold text-accent">{site}</div>
+                    <div className="font-semibold text-accent">
+                      {site} <span className="text-xs text-muted">(up to {mismatchMax} mismatches)</span>
+                    </div>
 
-                    {arr.map((hit, i) => {
-                      if (hit === "none") return null;
+                    {hasNone && <div className="text-xs text-muted">No mismatch hits were found.</div>}
 
-                      const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
+                    {!hasNone &&
+                      arr.map((hit, i) => {
+                        if (hit === "none") return null;
 
-                      return (
-                        <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
-                          <input
-                            type="radio"
-                            name={`fz-${site}`}
-                            className="mt-[3px]"
-                            checked={choice[site] === `fz-${i}`}
-                            onChange={() => {
-                              setChoice((p) => ({ ...p, [site]: `fz-${i}` }));
-                              setActiveSite(site);
-                            }}
-                          />
+                        const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
 
-                          <div>
-                            <div className="font-mono whitespace-pre leading-4">
-                              {hit.site}
-                              {"\n"}
-                              {hit.bars}
-                              {"\n"}
-                              {hit.match} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
-                            </div>
+                        return (
+                          <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
+                            <input
+                              type="radio"
+                              name={`fz-${site}`}
+                              className="mt-[3px]"
+                              checked={choice[site] === `fz-${i}`}
+                              onChange={() => {
+                                setChoice((p) => ({ ...p, [site]: `fz-${i}` }));
+                                setActiveSite(site);
+                              }}
+                            />
 
-                            {nearby.length > 0 && (
-                              <table className="mt-1 text-[11px]">
-                                <thead>
-                                  <tr>
-                                    <th className="pr-4 text-left">locus tag</th>
-                                    <th className="pr-4 text-left">gene name</th>
-                                    <th className="pr-4 text-left">function</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {nearby.map((g, idx) => (
-                                    <tr key={idx}>
-                                      <td className="pr-4">{g.locus}</td>
-                                      <td className="pr-4">{g.gene}</td>
-                                      <td className="pr-4">{g.function || ""}</td>
+                            <div className="space-y-1">
+                              <div className="font-mono whitespace-pre leading-4">
+                                {hit.site}
+                                {"\n"}
+                                {hit.bars}
+                                {"\n"}
+                                {hit.match} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc} (mm={hit.mm})
+                              </div>
+
+                              {nearby.length > 0 && (
+                                <table className="mt-1 text-[11px]">
+                                  <thead>
+                                    <tr>
+                                      <th className="pr-4 text-left">locus tag</th>
+                                      <th className="pr-4 text-left">gene</th>
+                                      <th className="pr-4 text-left">product</th>
+                                      <th className="pr-4 text-left">start</th>
+                                      <th className="pr-4 text-left">end</th>
+                                      <th className="pr-2 text-left">strand</th>
                                     </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
-                          </div>
-                        </label>
-                      );
-                    })}
+                                  </thead>
+                                  <tbody>
+                                    {nearby.map((g, idx) => (
+                                      <tr key={idx}>
+                                        <td className="pr-4">{g.locus}</td>
+                                        <td className="pr-4">{g.gene}</td>
+                                        <td className="pr-4">{g.product || ""}</td>
+                                        <td className="pr-4">{g.start}</td>
+                                        <td className="pr-4">{g.end}</td>
+                                        <td className="pr-2">{g.strand}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
 
                     <label className="flex items-center gap-2 text-xs cursor-pointer mt-2">
                       <input
@@ -735,7 +823,7 @@ export default function Step4ReportedSites() {
                           setActiveSite(site);
                         }}
                       />
-                      <span>No valid mismatch match (NOT completed)</span>
+                      <span>No valid mismatch match (not completed)</span>
                     </label>
                   </div>
                 );
@@ -745,7 +833,12 @@ export default function Step4ReportedSites() {
         </div>
       )}
 
-      <button className="btn mt-6" onClick={handleConfirm} disabled={!allCompleted} title={!allCompleted ? "Complete all sites first" : ""}>
+      <button
+        className="btn mt-6"
+        onClick={handleConfirm}
+        disabled={!allCompleted}
+        title={!allCompleted ? "Complete all sites first" : ""}
+      >
         Confirm and continue →
       </button>
     </div>
