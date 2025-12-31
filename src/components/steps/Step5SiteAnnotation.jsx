@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useCuration } from "../../context/CurationContext";
 
-// MAIN COMPONENT
 export default function Step5SiteAnnotation() {
   const { step4Data, techniques, step5Data, setStep5Data, goToNextStep } = useCuration();
 
@@ -20,10 +19,7 @@ export default function Step5SiteAnnotation() {
   const [bulkTfType, setBulkTfType] = useState("monomer");
   const [bulkTfFunc, setBulkTfFunc] = useState("activator");
 
-  // ----------------------------
-  // Normalize techniques coming from Step 3
-  // Supports: ["ECO:..."] or [{ecoId,name}] or other common shapes
-  // ----------------------------
+  // Normalize techniques from Step 3
   const techList = useMemo(() => {
     const arr = Array.isArray(techniques) ? techniques : [];
     return arr
@@ -52,25 +48,17 @@ export default function Step5SiteAnnotation() {
     return m;
   }, [techList]);
 
-  // ----------------------------
-  // Restore / initialize state
-  // - Keeps compatibility with old step5Data where useTechniques:boolean existed
-  // ----------------------------
+  // Restore / init state (also supports old "useTechniques" boolean)
   useEffect(() => {
-    const next = {};
-
-    // restore previous annotations if any
     const restored = step5Data?.annotations || {};
+    const next = {};
 
     sites.forEach((site) => {
       const prev = restored[site] || {};
-
-      // Old format compatibility: if useTechniques was true, mark all techniques true
       const oldUseAll = prev.useTechniques === true;
-
       const prevTechMap = prev.techniques || {};
-      const mergedTechMap = { ...emptyTechMap };
 
+      const mergedTechMap = { ...emptyTechMap };
       Object.keys(mergedTechMap).forEach((ecoId) => {
         mergedTechMap[ecoId] = oldUseAll ? true : !!prevTechMap[ecoId];
       });
@@ -92,9 +80,6 @@ export default function Step5SiteAnnotation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sites.length, techList.length]);
 
-  // ----------------------------
-  // Helpers
-  // ----------------------------
   function siteDisplayText(site) {
     const sel = choice[site];
     const ex = exactHits[site];
@@ -146,10 +131,7 @@ export default function Step5SiteAnnotation() {
     const next = { ...annotations };
     sites.forEach((s) => {
       if (!next[s]?.selected) return;
-      next[s] = {
-        ...next[s],
-        techniques: { ...(next[s].techniques || {}), [ecoId]: true },
-      };
+      next[s] = { ...next[s], techniques: { ...(next[s].techniques || {}), [ecoId]: true } };
     });
     setAnnotations(next);
   }
@@ -157,17 +139,11 @@ export default function Step5SiteAnnotation() {
   function clearTechniqueAll(ecoId) {
     const next = { ...annotations };
     sites.forEach((s) => {
-      next[s] = {
-        ...next[s],
-        techniques: { ...(next[s].techniques || {}), [ecoId]: false },
-      };
+      next[s] = { ...next[s], techniques: { ...(next[s].techniques || {}), [ecoId]: false } };
     });
     setAnnotations(next);
   }
 
-  // ----------------------------
-  // Confirm and continue
-  // ----------------------------
   function handleConfirm() {
     setStep5Data({
       annotations,
@@ -177,9 +153,12 @@ export default function Step5SiteAnnotation() {
     goToNextStep();
   }
 
-  // ----------------------------
-  // Render
-  // ----------------------------
+  // For sticky columns (left side)
+  const stickyBase = "sticky left-0 z-20 bg-surface";
+  const stickyCol2 = "sticky left-[320px] z-20 bg-surface"; // after Site column
+  const stickyCol3 = "sticky left-[440px] z-20 bg-surface"; // after TF-type column
+  // NOTE: widths below must match the column widths we set.
+
   return (
     <div className="space-y-8">
       <div className="bg-surface border border-border rounded p-4">
@@ -187,20 +166,42 @@ export default function Step5SiteAnnotation() {
           <span>Site annotation</span>
         </div>
 
-        <div className="text-sm overflow-x-auto">
-          <table className="w-full text-xs border-collapse">
+        {/* Horizontal scroll container (prevents overlap) */}
+        <div className="overflow-x-auto">
+          <table className="min-w-max w-full text-xs border-collapse">
             <thead>
+              {/* Header row 1: grouped Experimental techniques */}
               <tr className="border-b border-border">
-                <th className="text-left px-2 py-1">Site</th>
-                <th className="text-left px-2 py-1">TF-type</th>
-                <th className="text-left px-2 py-1">TF-function</th>
+                <th className={`text-left px-2 py-2 ${stickyBase}`} style={{ minWidth: 320 }}>
+                  Site
+                </th>
+                <th className={`text-left px-2 py-2 ${stickyCol2}`} style={{ minWidth: 120 }}>
+                  TF-type
+                </th>
+                <th className={`text-left px-2 py-2 ${stickyCol3}`} style={{ minWidth: 140 }}>
+                  TF-function
+                </th>
 
-                {/* One column per selected technique (CollecTF-style) */}
                 {techList.length > 0 ? (
-                  techList.map((t) => (
-                    <th key={t.id} className="text-left px-2 py-1 align-bottom whitespace-normal min-w-[140px]">
-                      <div className="font-semibold leading-4">{t.label}</div>
-                      <div className="flex gap-2 text-[11px] mt-1">
+                  <th className="text-left px-2 py-2" colSpan={techList.length}>
+                    Experimental techniques
+                  </th>
+                ) : (
+                  <th className="text-left px-2 py-2">Experimental techniques</th>
+                )}
+              </tr>
+
+              {/* Header row 2: technique names (like CollecTF) */}
+              {techList.length > 0 && (
+                <tr className="border-b border-border">
+                  <th className={`${stickyBase} px-2 py-2`} style={{ minWidth: 320 }} />
+                  <th className={`${stickyCol2} px-2 py-2`} style={{ minWidth: 120 }} />
+                  <th className={`${stickyCol3} px-2 py-2`} style={{ minWidth: 140 }} />
+
+                  {techList.map((t) => (
+                    <th key={t.id} className="px-2 py-2 align-top" style={{ minWidth: 170 }}>
+                      <div className="font-semibold leading-4 break-words">{t.label}</div>
+                      <div className="flex gap-2 text-[11px] mt-1 whitespace-nowrap">
                         <button
                           type="button"
                           className="text-blue-400 hover:text-blue-300 underline"
@@ -217,63 +218,52 @@ export default function Step5SiteAnnotation() {
                         </button>
                       </div>
                     </th>
-                  ))
-                ) : (
-                  <th className="text-left px-2 py-1">Experimental techniques</th>
-                )}
-              </tr>
+                  ))}
+                </tr>
+              )}
             </thead>
 
             <tbody>
-              {/* BULK ROW */}
+              {/* BULK ROW (this is where you wanted the techniques block to “sit”) */}
               <tr className="border-b border-border bg-muted/40">
-                <td className="px-2 py-2 align-top">
+                <td className={`${stickyBase} px-2 py-2 align-top`} style={{ minWidth: 320 }}>
                   <button type="button" className="text-blue-400 hover:text-blue-300 underline" onClick={toggleSelectAll}>
                     Select/Unselect all
                   </button>
                 </td>
 
-                <td className="px-2 py-2 align-top">
+                <td className={`${stickyCol2} px-2 py-2 align-top`} style={{ minWidth: 120 }}>
                   <div className="flex flex-col gap-1">
                     <select className="form-control text-xs" value={bulkTfType} onChange={(e) => setBulkTfType(e.target.value)}>
                       {TF_TYPES.map((t) => (
                         <option key={t}>{t}</option>
                       ))}
                     </select>
-
-                    <button
-                      type="button"
-                      className="text-blue-400 hover:text-blue-300 underline text-[11px]"
-                      onClick={applyTfTypeToSelected}
-                    >
+                    <button type="button" className="text-blue-400 hover:text-blue-300 underline text-[11px]" onClick={applyTfTypeToSelected}>
                       Apply to selected
                     </button>
                   </div>
                 </td>
 
-                <td className="px-2 py-2 align-top">
+                <td className={`${stickyCol3} px-2 py-2 align-top`} style={{ minWidth: 140 }}>
                   <div className="flex flex-col gap-1">
                     <select className="form-control text-xs" value={bulkTfFunc} onChange={(e) => setBulkTfFunc(e.target.value)}>
                       {TF_FUNCS.map((t) => (
                         <option key={t}>{t}</option>
                       ))}
                     </select>
-
-                    <button
-                      type="button"
-                      className="text-blue-400 hover:text-blue-300 underline text-[11px]"
-                      onClick={applyTfFuncToSelected}
-                    >
+                    <button type="button" className="text-blue-400 hover:text-blue-300 underline text-[11px]" onClick={applyTfFuncToSelected}>
                       Apply to selected
                     </button>
                   </div>
                 </td>
 
-                {/* If no techniques selected, show placeholder */}
-                {techList.length === 0 && <td className="px-2 py-2 text-muted">—</td>}
-
-                {/* If techniques exist, leave bulk-row technique cells empty (controls are in headers) */}
-                {techList.length > 0 && techList.map((t) => <td key={t.id} className="px-2 py-2" />)}
+                {/* Technique bulk row cells: empty (controls are in header row 2) */}
+                {techList.length > 0 ? (
+                  techList.map((t) => <td key={t.id} className="px-2 py-2" style={{ minWidth: 170 }} />)
+                ) : (
+                  <td className="px-2 py-2 text-muted">—</td>
+                )}
               </tr>
 
               {/* SITE ROWS */}
@@ -287,7 +277,7 @@ export default function Step5SiteAnnotation() {
 
                 return (
                   <tr key={site} className="border-b border-border">
-                    <td className="px-2 py-2 align-top">
+                    <td className={`${stickyBase} px-2 py-2 align-top`} style={{ minWidth: 320 }}>
                       <label className="flex gap-2 cursor-pointer">
                         <input
                           type="checkbox"
@@ -303,7 +293,7 @@ export default function Step5SiteAnnotation() {
                       </label>
                     </td>
 
-                    <td className="px-2 py-2 align-top">
+                    <td className={`${stickyCol2} px-2 py-2 align-top`} style={{ minWidth: 120 }}>
                       <select
                         className="form-control text-xs"
                         value={ann.tfType}
@@ -320,7 +310,7 @@ export default function Step5SiteAnnotation() {
                       </select>
                     </td>
 
-                    <td className="px-2 py-2 align-top">
+                    <td className={`${stickyCol3} px-2 py-2 align-top`} style={{ minWidth: 140 }}>
                       <select
                         className="form-control text-xs"
                         value={ann.tfFunc}
@@ -337,10 +327,9 @@ export default function Step5SiteAnnotation() {
                       </select>
                     </td>
 
-                    {/* One checkbox per technique */}
                     {techList.length > 0 ? (
                       techList.map((t) => (
-                        <td key={t.id} className="px-2 py-2 align-top">
+                        <td key={t.id} className="px-2 py-2 align-top text-center" style={{ minWidth: 170 }}>
                           <input
                             type="checkbox"
                             checked={!!ann.techniques?.[t.id]}

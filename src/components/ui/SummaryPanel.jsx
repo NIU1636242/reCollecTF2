@@ -1,7 +1,8 @@
+// src/components/ui/SummaryPanel.jsx
 import { useCuration } from "../../context/CurationContext";
 
 export default function SummaryPanel() {
-  const { //importem la info necessaria
+  const {
     publication,
     tf,
     genomeList,
@@ -15,7 +16,17 @@ export default function SummaryPanel() {
   const firstUniProt = uniprotList[0];
   const firstRefseq = refseqList[0];
 
-  return ( //mostrem la info 
+  function techId(t) {
+    return typeof t === "string"
+      ? t
+      : t?.ecoId || t?.eco || t?.EO_term || t?.id || t?.code || "";
+  }
+
+  function techName(t) {
+    return typeof t === "string" ? "" : (t?.name || t?.label || "");
+  }
+
+  return (
     <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 w-72">
       <h3 className="text-xl font-bold mb-3 text-accent">Summary</h3>
 
@@ -56,7 +67,7 @@ export default function SummaryPanel() {
         )}
       </div>
 
-      {/* GENOME & ACCESSION NUMBERS*/}
+      {/* GENOME & ACCESSION NUMBERS */}
       <div className="mb-4">
         <h4 className="font-semibold text-sky-300">Genome & TF accessions</h4>
         {firstGenome || firstUniProt || firstRefseq ? (
@@ -85,13 +96,17 @@ export default function SummaryPanel() {
       {/* EXPERIMENTAL METHODS (STEP3) */}
       <div className="mb-4">
         <h4 className="font-semibold text-sky-300">Experimental Methods</h4>
-        {techniques && techniques.length > 0 ? (
-          <ul className="text-sm mt-1 list-disc pl-4">
-            {techniques.map((t, i) => (
-              <li key={i}>
-                {typeof t === "string" ? t : `${t.eco} — ${t.name}`}
-              </li>
-            ))}
+        {Array.isArray(techniques) && techniques.length > 0 ? (
+          <ul className="text-sm mt-1 list-disc pl-4 space-y-1">
+            {techniques.map((t, i) => {
+              const id = techId(t);
+              const name = techName(t);
+              return (
+                <li key={i}>
+                  {name ? `${id} — ${name}` : id || "—"}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="text-sm text-gray-400">None added</p>
