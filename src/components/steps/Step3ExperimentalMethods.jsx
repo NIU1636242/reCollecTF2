@@ -1,6 +1,7 @@
+// src/components/steps/Step3ExperimentalMethods.jsx
 import { useState, useEffect } from "react";
-import { runQuery } from "../../db/queryExecutor"; //Executa SQL a la base de dades
-import { useCuration } from "../../context/CurationContext"; //Permet llegir o modificar el que està guardat a CurationContext
+import { runQuery } from "../../db/queryExecutor";
+import { useCuration } from "../../context/CurationContext";
 
 export default function Step3ExperimentalMethods() {
   const { techniques, setTechniques, goToNextStep } = useCuration();
@@ -10,26 +11,31 @@ export default function Step3ExperimentalMethods() {
   const [ecoName, setEcoName] = useState("");
   const [existsInDB, setExistsInDB] = useState(null);
 
-  //Per a crear un nou ECO (categoría i nova descripció)
+  // Create a new technique (category + description)
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [techDescription, setTechDescription] = useState("");
 
-  const [loading] = useState(false);
-  const [suggestions, setSuggestions] = useState([]); //Per a la llista d'autocompletat
+  const [suggestions, setSuggestions] = useState([]);
 
-  const [error, setError] = useState(""); //Missatges d'error (duplicats, etc.)
-  const [showCreateForm, setShowCreateForm] = useState(false); //per obrir el formulari manual
+  const [error, setError] = useState("");
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
-  //ECO para nueva técnica (input nuevo)
+  // Manual ECO code (new)
   const [newEcoCode, setNewEcoCode] = useState("");
 
   function esc(str) {
-    //Evita error als strings amb les cometes simples
     return String(str || "").replace(/'/g, "''");
   }
 
-  // Carregar technique categories
+  // Normalize technique shape
+  // - If string => ECO code
+  // - If object => try common keys
+  function getEcoId(t) {
+    return typeof t === "string" ? t : t?.ecoId || t?.eco || t?.EO_term || t?.id || "";
+  }
+
+  // Load categories
   useEffect(() => {
     async function fetchCategories() {
       const rows = await runQuery(`
@@ -42,7 +48,7 @@ export default function Step3ExperimentalMethods() {
     fetchCategories();
   }, []);
 
-  //Autocompletar (nom o ECO code)
+  // Autocomplete (by name or ECO code)
   async function handleAutocomplete(val) {
     setEcoInput(val);
     setValidatedEco(null);
@@ -69,7 +75,7 @@ export default function Step3ExperimentalMethods() {
     setSuggestions(rows);
   }
 
-  //Quan es selecciona un ECO existent (autocomplete)
+  // Select existing technique from autocomplete
   function selectExisting(ecoCode, name) {
     setEcoInput(ecoCode);
     setValidatedEco(ecoCode);
@@ -80,35 +86,37 @@ export default function Step3ExperimentalMethods() {
     setError("");
   }
 
-  //Quan es clica a Add to Curation i el ECO ja exisitia a la base de dades
+  // Add existing technique to curation
   function handleAddExisting() {
     if (!validatedEco) return;
 
-    if (techniques.includes(validatedEco)) {
+    const exists = techniques.some((t) => getEcoId(t) === validatedEco);
+    if (exists) {
       setError("This ECO code is already added to the curation.");
       return;
     }
 
-    setTechniques([...techniques, validatedEco]);
+    // Store BOTH ecoId + name (so Step5 can display names/columns)
+    setTechniques([...techniques, { ecoId: validatedEco, name: ecoName }]);
+
     setValidatedEco(null);
     setEcoInput("");
     setError("");
   }
 
-  //Obrir formulari manual
+  // Open manual create form
   function handleAddTechnique() {
     setError("");
     setShowCreateForm(true);
 
-    //reseteamos por si había datos previos
     setValidatedEco(null);
     setExistsInDB(false);
     setTechDescription("");
     setSelectedCategory("");
-    setNewEcoCode(""); //nuevo campo ECO manual
+    setNewEcoCode("");
   }
 
-  //Crear la nova tècnica manualment
+  // Create a new technique manually
   async function handleCreateEco() {
     if (!newEcoCode.trim()) {
       setError("Please enter an ECO code.");
@@ -118,13 +126,17 @@ export default function Step3ExperimentalMethods() {
     let raw = newEcoCode.trim().toUpperCase();
     if (!raw.startsWith("ECO:")) raw = "ECO:" + raw;
 
-    //Evitar duplicats
-    if (techniques.includes(raw)) {
+    const exists = techniques.some((t) => getEcoId(t) === raw);
+    if (exists) {
       setError("This ECO code is already added to the curation.");
       return;
     }
 
-    //preparació per deploy al Step7
+    if (!selectedCategory) {
+      setError("Please select a category.");
+      return;
+    }
+
     const sql = `
       INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
       VALUES (NULL, '${esc(techDescription)}', NULL, '${esc(raw)}');
@@ -136,10 +148,13 @@ export default function Step3ExperimentalMethods() {
       );
     `;
 
-    //Afegim  tècnica a la llista
-    setTechniques([...techniques, raw]);
+    // NOTE: keeping your original behavior: SQL is prepared for Step7 deploy (not executed here).
+    // If you DO want to execute now, uncomment:
+    // await runQuery(sql);
 
-    //reset formulari
+    // Store technique as object (name fallback to ECO code)
+    setTechniques([...techniques, { ecoId: raw, name: raw }]);
+
     setShowCreateForm(false);
     setNewEcoCode("");
     setTechDescription("");
@@ -147,7 +162,7 @@ export default function Step3ExperimentalMethods() {
     setError("");
   }
 
-  //Eliminar una tècnica de la llista
+  // Remove technique
   function handleRemoveTechnique(index) {
     const updated = techniques.filter((_, i) => i !== index);
     setTechniques(updated);
@@ -169,12 +184,12 @@ export default function Step3ExperimentalMethods() {
             onChange={(e) => handleAutocomplete(e.target.value)}
           />
 
-          <button className="btn" onClick={handleAddTechnique}>
+          <button className="btn" type="button" onClick={handleAddTechnique}>
             + Add technique
           </button>
         </div>
 
-        {/* Autocompletar */}
+        {/* Autocomplete */}
         {suggestions.length > 0 && (
           <div className="border border-border p-2 bg-surface rounded mt-1">
             {suggestions.map((s) => (
@@ -193,24 +208,22 @@ export default function Step3ExperimentalMethods() {
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
       </div>
 
-      {/* Existing ECO */}
+      {/* Existing ECO selected */}
       {validatedEco && existsInDB === true && (
         <div className="p-4 bg-surface border border-border rounded">
           <p>
             <strong>{ecoName}</strong> ({validatedEco})
           </p>
-          <button className="btn mt-2" onClick={handleAddExisting}>
+          <button className="btn mt-2" type="button" onClick={handleAddExisting}>
             Add to curation
           </button>
         </div>
       )}
 
-      {/* Formulari MANUAL */}
+      {/* Manual create form */}
       {showCreateForm && (
         <div className="p-4 bg-surface border border-border rounded space-y-3">
-          <h3 className="text-lg font-semibold">
-            Create new experimental technique
-          </h3>
+          <h3 className="text-lg font-semibold">Create new experimental technique</h3>
 
           {/* ECO code manual */}
           <div>
@@ -250,52 +263,56 @@ export default function Step3ExperimentalMethods() {
             />
           </div>
 
-          <button className="btn" onClick={handleCreateEco}>
+          <button className="btn" type="button" onClick={handleCreateEco}>
             Save new technique
           </button>
         </div>
       )}
 
-      {/* Llista */}
+      {/* List */}
       <div>
         <h3 className="font-semibold mt-4">Added techniques:</h3>
         {techniques.length === 0 && <p>None yet.</p>}
 
         <ul className="list-disc pl-6">
-          {techniques.map((t, i) => (
-          <li key={i} className="list-item">
-            <div className="flex items-center gap-2">
-            {typeof t === "string" ? t : `${t.eco} — ${t.name}`}
+          {techniques.map((t, i) => {
+            const ecoId = getEcoId(t);
+            const name = typeof t === "string" ? "" : t?.name || "";
+            return (
+              <li key={i} className="list-item">
+                <div className="flex items-center gap-2">
+                  {typeof t === "string" ? ecoId : `${ecoId} — ${name}`}
 
-            {/* Icona de paperera */}
-            <button
-              type="button"
-              onClick={() => handleRemoveTechnique(i)}
-              className="text-red-400 hover:text-red-300"
-            >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.8}
-              stroke="currentColor"
-              className="w-5 h-5"
-             >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M6 7h12M9 7V4h6v3m-8 4h10l-1 9H8l-1-9z"
-            />
-            </svg>
-            </button>
-            </div>
-          </li>
-          ))}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveTechnique(i)}
+                    className="text-red-400 hover:text-red-300"
+                    title="Remove"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.8}
+                      stroke="currentColor"
+                      className="w-5 h-5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M6 7h12M9 7V4h6v3m-8 4h10l-1 9H8l-1-9z"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
       {techniques.length > 0 && (
-        <button className="btn mt-4" onClick={goToNextStep}>
+        <button className="btn mt-4" type="button" onClick={goToNextStep}>
           Confirm and continue →
         </button>
       )}
