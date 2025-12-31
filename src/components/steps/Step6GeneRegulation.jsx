@@ -1,64 +1,78 @@
-import React, { useState, useEffect } from "react";
+// src/components/steps/Step6GeneRegulation.jsx
+import React, { useEffect, useMemo, useState } from "react";
 import { useCuration } from "../../context/CurationContext";
 
-// MAIN COMPONENT
 export default function Step6GeneRegulation() {
   const {
     step4Data,
     step6Data,
     setStep6Data,
     goToNextStep,
+    genomes,       // must contain the genomes + genes loaded previously (same shape as Step 4 used)
+    strainData,    // from Step 2 (expressionInfo flag)
   } = useCuration();
 
-  const { genomes } = useCuration(); // mismos genomas cargados en step4
+  const expressionEnabled = !!strainData?.expressionInfo;
+
+  const sites = step4Data?.sites || [];
+  const choice = step4Data?.choice || {};
+  const exactHits = step4Data?.exactHits || {};
+  const fuzzyHits = step4Data?.fuzzyHits || {};
 
   const [regulation, setRegulation] = useState({});
+  const [activeSite, setActiveSite] = useState(null);
 
-  // ============================
+  // -----------------------------
   // RESTORE STATE
-  // ============================
+  // -----------------------------
   useEffect(() => {
-    if (step6Data) {
-      setRegulation(step6Data);
+    if (step6Data) setRegulation(step6Data);
+  }, [step6Data]);
+
+  useEffect(() => {
+    if (!sites.length) {
+      setActiveSite(null);
+      return;
     }
-  }, []);
+    setActiveSite((prev) => (prev && sites.includes(prev) ? prev : sites[0]));
+  }, [sites]);
 
   if (!step4Data) {
     return (
       <div className="text-sm text-red-400">
-        Step 4 data not found. Please complete reported sites first.
+        Step 4 data not found. Please complete Reported Sites first.
       </div>
     );
   }
 
-  const { sites, choice, exactHits, fuzzyHits } = step4Data;
-
-  // ============================
-  // RECONSTRUCT FINAL HIT
-  // ============================
+  // -----------------------------
+  // RECONSTRUCT FINAL HIT (chosen in Step 4)
+  // -----------------------------
   function getSelectedHit(site) {
-    const sel = choice[site];
+    const sel = choice?.[site];
     if (!sel) return null;
 
     if (sel.startsWith("ex-")) {
       const idx = parseInt(sel.split("-")[1], 10);
-      return exactHits[site]?.[idx] || null;
+      const hit = exactHits?.[site]?.[idx];
+      return hit && hit !== "none" ? hit : null;
     }
 
     if (sel.startsWith("fz-")) {
       const idx = parseInt(sel.split("-")[1], 10);
-      return fuzzyHits[site]?.[idx] || null;
+      const hit = fuzzyHits?.[site]?.[idx];
+      return hit && hit !== "none" ? hit : null;
     }
 
     return null;
   }
 
-  // ============================
-  // FIND NEARBY GENES (±150 nt)
-  // ============================
+  // -----------------------------
+  // FIND NEARBY GENES (±150 nt chain logic)
+  // -----------------------------
   function findGenesForHit(acc, hitStart, hitEnd) {
-    const genome = genomes.find((g) => g.acc === acc);
-    if (!genome || !genome.genes) return [];
+    const genome = (genomes || []).find((g) => g.acc === acc);
+    if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
 
     const genes = genome.genes;
 
@@ -79,40 +93,61 @@ export default function Step6GeneRegulation() {
       }
     });
 
-    if (bestIdx === -1 || bestDist > 150) return [];
+    // If nothing is within 150, still return the closest gene (bestIdx),
+    // then extend by chain gaps <=150. This matches the philosophy you used in Step 4.
+    if (bestIdx === -1) return [];
 
     const out = [];
-    const push = (g) => {
+    const pushUnique = (g) => {
       if (!out.some((x) => x.locus === g.locus)) {
         out.push({
-          locus: g.locus,
-          gene: g.gene,
-          function: g.function,
+          locus: g.locus || "",
+          gene: g.gene || "",
+          product: g.function || g.product || "", // depending on your gene object naming
+          start: g.start,
+          end: g.end,
+          strand: g.strand || "", // if available
         });
       }
     };
 
-    push(genes[bestIdx]);
+    pushUnique(genes[bestIdx]);
 
+    // extend left by gene-to-gene gaps
     let i = bestIdx - 1;
-    while (i >= 0 && genes[i + 1].start - genes[i].end <= 150) {
-      push(genes[i--]);
+    while (i >= 0) {
+      const current = genes[i];
+      const next = genes[i + 1];
+      const gap = next.start - current.end;
+      if (gap > 150) break;
+      pushUnique(current);
+      i--;
     }
 
+    // extend right by gene-to-gene gaps
     i = bestIdx + 1;
-    while (i < genes.length && genes[i].start - genes[i - 1].end <= 150) {
-      push(genes[i++]);
+    while (i < genes.length) {
+      const prev = genes[i - 1];
+      const current = genes[i];
+      const gap = current.start - prev.end;
+      if (gap > 150) break;
+      pushUnique(current);
+      i++;
     }
 
+    // sort by genomic coordinate (nice for user)
+    out.sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
     return out;
   }
 
-  // ============================
-  // TOGGLE GENE SELECTION
-  // ============================
+  // -----------------------------
+  // TOGGLE GENE SELECTION (only if expressionEnabled)
+  // -----------------------------
   function toggleGene(site, gene) {
+    if (!expressionEnabled) return;
+
     setRegulation((prev) => {
-      const current = prev[site]?.regulatedGenes || [];
+      const current = prev?.[site]?.regulatedGenes || [];
       const exists = current.some((g) => g.locus === gene.locus);
 
       const updated = exists
@@ -122,78 +157,138 @@ export default function Step6GeneRegulation() {
       return {
         ...prev,
         [site]: {
-          ...prev[site],
+          ...(prev?.[site] || {}),
           regulatedGenes: updated,
         },
       };
     });
   }
 
-  // ============================
+  // -----------------------------
   // CONFIRM
-  // ============================
+  // -----------------------------
   function handleConfirm() {
+    // Even if expression is disabled, we still persist (likely empty) and allow next step.
     setStep6Data(regulation);
     goToNextStep();
   }
 
-  // ============================
+  const visibleSites = useMemo(() => {
+    if (!sites.length) return [];
+    if (activeSite && sites.includes(activeSite)) return [activeSite];
+    return [sites[0]];
+  }, [sites, activeSite]);
+
+  // -----------------------------
   // RENDER
-  // ============================
+  // -----------------------------
   return (
     <div className="space-y-6 text-sm">
-      <h2 className="font-semibold">
-        Gene regulation (experimental support)
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold">Gene regulation (experimental support)</h2>
+      </div>
 
-      {sites.map((site) => {
+      {!expressionEnabled && (
+        <div className="bg-surface border border-border rounded p-4 text-sm text-muted">
+          Expression data was not indicated in Step 2, so gene regulation cannot be curated for this manuscript.
+          You can review the nearby genes, but selection is disabled.
+        </div>
+      )}
+
+      {sites.length > 0 && (
+        <div className="bg-surface border border-border rounded p-3">
+          <div className="text-sm font-semibold mb-2">Select a site</div>
+
+          <div className="border border-border rounded overflow-hidden">
+            {sites.map((s) => {
+              const selected = activeSite === s;
+              const hit = getSelectedHit(s);
+              const hasHit = !!hit;
+
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setActiveSite(s)}
+                  className={[
+                    "w-full text-left px-3 py-2 text-sm border-b last:border-b-0",
+                    "hover:bg-muted",
+                    selected ? "bg-muted/60" : "",
+                    !hasHit ? "opacity-60" : "",
+                  ].join(" ")}
+                  title={!hasHit ? "No selected genomic mapping in Step 4" : ""}
+                >
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {visibleSites.map((site) => {
         const hit = getSelectedHit(site);
-        if (!hit) return null;
+        if (!hit) {
+          return (
+            <div key={site} className="bg-surface border border-border rounded p-4 text-muted">
+              No genomic mapping selected for <span className="font-mono">{site}</span> in Step 4.
+            </div>
+          );
+        }
 
-        const genes = findGenesForHit(
-          hit.acc,
-          hit.start + 1,
-          hit.end + 1
-        );
+        const genes = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
 
         return (
-          <div
-            key={site}
-            className="border border-border rounded p-4 space-y-2"
-          >
+          <div key={site} className="bg-surface border border-border rounded p-4 space-y-3">
             <div className="font-mono text-xs">
-              {site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
+              {hit.site} {hit.strand}[{hit.start + 1},{hit.end + 1}] {hit.acc}
             </div>
 
-            <div className="space-y-1">
-              {genes.map((g) => {
-                const checked =
-                  regulation[site]?.regulatedGenes?.some(
-                    (x) => x.locus === g.locus
-                  ) || false;
+            {genes.length === 0 ? (
+              <div className="text-muted">No nearby genes found for this mapping.</div>
+            ) : (
+              <div className="space-y-2">
+                {genes.map((g) => {
+                  const checked =
+                    regulation?.[site]?.regulatedGenes?.some((x) => x.locus === g.locus) || false;
 
-                return (
-                  <label
-                    key={g.locus}
-                    className="flex items-start gap-2 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleGene(site, g)}
-                    />
-                    <div>
-                      <div className="font-semibold">
-                        {g.locus} {g.gene}
+                  return (
+                    <label
+                      key={g.locus || `${g.start}-${g.end}`}
+                      className={[
+                        "flex items-start gap-2 cursor-pointer border border-border rounded px-3 py-2",
+                        "hover:bg-muted/30",
+                        !expressionEnabled ? "opacity-70 cursor-not-allowed" : "",
+                      ].join(" ")}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!expressionEnabled}
+                        onChange={() => toggleGene(site, g)}
+                        className="mt-1"
+                      />
+
+                      <div className="min-w-0">
+                        <div className="font-semibold">
+                          {g.locus}
+                          {g.gene ? ` (${g.gene})` : ""}
+                        </div>
+
+                        <div className="text-xs text-muted">
+                          {g.product || "—"}
+                        </div>
+
+                        <div className="text-xs text-muted mt-1">
+                          start: {g.start} &nbsp; end: {g.end}
+                          {g.strand ? `  |  strand: ${g.strand}` : ""}
+                        </div>
                       </div>
-                      <div className="text-xs text-muted">
-                        {g.function || "—"}
-                      </div>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}
