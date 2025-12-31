@@ -103,7 +103,7 @@ async function fetchTextWithFallback(originalUrl, { timeoutMs = 12000 } = {}) {
 // MAIN COMPONENT
 // -----------------------------
 export default function Step4ReportedSites() {
-  const { genomeList, step4Data, setStep4Data, goToNextStep } = useCuration();
+  const { genomeList, step4Data, setStep4Data, goToNextStep, genomes, setGenomes } = useCuration();
 
   const [accordion, setAccordion] = useState({ a1: true, a2: true, a3: false });
   const toggleAcc = (k) => setAccordion((p) => ({ ...p, [k]: !p[k] }));
@@ -121,7 +121,6 @@ export default function Step4ReportedSites() {
   const [loadingGenomes, setLoadingGenomes] = useState(false);
 
   const genomeCacheRef = useRef(new Map());
-  const [genomes, setGenomes] = useState([]);
 
   const hasSaved = sites.length > 0;
 
@@ -163,6 +162,11 @@ export default function Step4ReportedSites() {
 
   useEffect(() => {
     if (!genomeList || genomeList.length === 0) return;
+
+    // If genomes already loaded for these accessions, skip reload
+    const accs = genomeList.map((g) => g.accession).filter(Boolean);
+    const haveAll = accs.length > 0 && accs.every((acc) => genomes?.some((x) => x.acc === acc && x.sequence && x.genes?.length));
+    if (haveAll) return;
 
     let cancelled = false;
 
@@ -592,8 +596,8 @@ export default function Step4ReportedSites() {
                                   <thead>
                                     <tr>
                                       <th className="pr-4 text-left">locus tag</th>
-                                      <th className="pr-4 text-left">gene</th>
-                                      <th className="pr-4 text-left">product</th>
+                                      <th className="pr-4 text-left">gene name</th>
+                                      <th className="pr-4 text-left">function</th>
                                       <th className="pr-4 text-left">start</th>
                                       <th className="pr-4 text-left">end</th>
                                       <th className="pr-2 text-left">strand</th>
@@ -693,8 +697,8 @@ export default function Step4ReportedSites() {
                                   <thead>
                                     <tr>
                                       <th className="pr-4 text-left">locus tag</th>
-                                      <th className="pr-4 text-left">gene</th>
-                                      <th className="pr-4 text-left">product</th>
+                                      <th className="pr-4 text-left">gene name</th>
+                                      <th className="pr-4 text-left">function</th>
                                       <th className="pr-4 text-left">start</th>
                                       <th className="pr-4 text-left">end</th>
                                       <th className="pr-2 text-left">strand</th>
