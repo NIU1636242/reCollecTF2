@@ -70,75 +70,59 @@ export default function Step6GeneRegulation() {
   // -----------------------------
   // FIND NEARBY GENES (±150 nt chain logic)
   // -----------------------------
-  function findGenesForHit(acc, hitStart, hitEnd) {
-    const genome = (genomes || []).find((g) => g.acc === acc);
-    if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
+  function findGenesForHit(acc, hitStart1, hitEnd1) {
+  const genome = (genomes || []).find((g) => g.acc === acc);
+  if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
 
-    const genes = genome.genes;
+  const genes = genome.genes;
+  const hitEnd = hitEnd1;
 
-    const distToSite = (gene) => {
-      if (hitEnd < gene.start) return gene.start - hitEnd;
-      if (hitStart > gene.end) return hitStart - gene.end;
-      return 0;
-    };
+  // IMPORTANT: anchor to the first gene on the RIGHT (start >= hitEnd)
+  let anchorIdx = genes.findIndex((g) => Number(g.start) >= Number(hitEnd));
+  if (anchorIdx === -1) anchorIdx = genes.length - 1;
 
-    let bestIdx = -1;
-    let bestDist = Infinity;
-
-    genes.forEach((g, i) => {
-      const d = distToSite(g);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
-    });
-
-    // If nothing is within 150, still return the closest gene (bestIdx),
-    // then extend by chain gaps <=150. This matches the philosophy you used in Step 4.
-    if (bestIdx === -1) return [];
-
-    const out = [];
-    const pushUnique = (g) => {
-      if (!out.some((x) => x.locus === g.locus)) {
-        out.push({
-          locus: g.locus || "",
-          gene: g.gene || "",
-          product: g.function || g.product || "", // depending on your gene object naming
-          start: g.start,
-          end: g.end,
-          strand: g.strand || "", // if available
-        });
-      }
-    };
-
-    pushUnique(genes[bestIdx]);
-
-    // extend left by gene-to-gene gaps
-    let i = bestIdx - 1;
-    while (i >= 0) {
-      const current = genes[i];
-      const next = genes[i + 1];
-      const gap = next.start - current.end;
-      if (gap > 150) break;
-      pushUnique(current);
-      i--;
+  const out = [];
+  const pushUnique = (g) => {
+    if (!g) return;
+    if (!out.some((x) => x.locus === g.locus)) {
+      out.push({
+        locus: g.locus || "",
+        geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
+        product: g.product || "",
+        start: g.start,
+        end: g.end,
+        strand: g.strand || "+",
+      });
     }
+  };
 
-    // extend right by gene-to-gene gaps
-    i = bestIdx + 1;
-    while (i < genes.length) {
-      const prev = genes[i - 1];
-      const current = genes[i];
-      const gap = current.start - prev.end;
-      if (gap > 150) break;
-      pushUnique(current);
-      i++;
-    }
+  pushUnique(genes[anchorIdx]);
 
-    // sort by genomic coordinate (nice for user)
-    out.sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
-    return out;
+  // extend left by gene-to-gene gaps
+  let i = anchorIdx - 1;
+  while (i >= 0) {
+    const current = genes[i];
+    const next = genes[i + 1];
+    const gap = Number(next.start) - Number(current.end);
+    if (gap > 150) break;
+    pushUnique(current);
+    i--;
   }
+
+  // extend right by gene-to-gene gaps
+  i = anchorIdx + 1;
+  while (i < genes.length) {
+    const prev = genes[i - 1];
+    const current = genes[i];
+    const gap = Number(current.start) - Number(prev.end);
+    if (gap > 150) break;
+    pushUnique(current);
+    i++;
+  }
+
+  out.sort((a, b) => Number(a.start) - Number(b.start));
+  return out;
+}
 
   // -----------------------------
   // TOGGLE GENE SELECTION (only if expressionEnabled)
@@ -272,7 +256,7 @@ export default function Step6GeneRegulation() {
                       <div className="min-w-0">
                         <div className="font-semibold">
                           {g.locus}
-                          {g.gene ? ` (${g.gene})` : ""}
+                          {g.geneLabel && g.geneLabel !== "—" ? ` (${g.geneLabel})` : ""}
                         </div>
 
                         <div className="text-xs text-muted">
