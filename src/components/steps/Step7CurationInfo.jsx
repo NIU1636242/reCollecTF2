@@ -266,83 +266,83 @@ export default function Step7CurationInfo() {
         sql.push("DROP TABLE IF EXISTS _tmp_sites;");
         // NOTE: your DB uses meta_site_id / motif_id; keep meta_site_id temp for convenience
         sql.push("CREATE TEMP TABLE _tmp_sites(site TEXT PRIMARY KEY, site_instance_id INTEGER, curation_siteinstance_id INTEGER, meta_site_id INTEGER);");
+        
+        // 1) Publication UPSERT (robusto) + guardar publication_id en _tmp_pub
+{
+  const cols = [];
+  const vals = [];
 
-        // 1) Publication upsert (minimal columns)
-        {
-            const cols = [];
-            const vals = [];
+  if (pubCols.has("pmid") && publication.pmid && isPmid(publication.pmid)) {
+    cols.push("pmid");
+    vals.push(`'${esc(publication.pmid)}'`);
+  }
+  if (pubCols.has("doi") && publication.doi && publication.doi !== "No DOI" && isDoi(publication.doi)) {
+    cols.push("doi");
+    vals.push(`'${esc(publication.doi)}'`);
+  }
+  if (pubCols.has("url") && doiUrl) {
+    cols.push("url");
+    vals.push(`'${esc(doiUrl)}'`);
+  }
+  if (pubCols.has("title")) {
+    cols.push("title");
+    vals.push(`'${esc(publication.title || "")}'`);
+  }
+  if (pubCols.has("authors")) {
+    cols.push("authors");
+    vals.push(`'${esc(publication.authors || "")}'`);
+  }
+  if (pubCols.has("journal")) {
+    cols.push("journal");
+    vals.push(`'${esc(publication.journal || "")}'`);
+  }
+  if (pubCols.has("publication_date")) {
+    cols.push("publication_date");
+    vals.push(`'${esc(publication.pubdate || "")}'`);
+  } else if (pubCols.has("pubdate")) {
+    cols.push("pubdate");
+    vals.push(`'${esc(publication.pubdate || "")}'`);
+  }
 
-            if (pubCols.has("publication_id")) {
-                cols.push("publication_id");
-                vals.push(`(SELECT IFNULL(MAX(publication_id),0)+1 FROM core_publication)`);
-            }
-            if (pubCols.has("pmid") && publication.pmid && isPmid(publication.pmid)) {
-                cols.push("pmid");
-                vals.push(`'${esc(publication.pmid)}'`);
-            }
-            if (pubCols.has("doi") && publication.doi && publication.doi !== "No DOI" && isDoi(publication.doi)) {
-                cols.push("doi");
-                vals.push(`'${esc(publication.doi)}'`);
-            }
-            if (pubCols.has("url") && doiUrl) {
-                cols.push("url");
-                vals.push(`'${esc(doiUrl)}'`);
-            }
-            if (pubCols.has("title")) {
-                cols.push("title");
-                vals.push(`'${esc(publication.title || "")}'`);
-            }
-            if (pubCols.has("authors")) {
-                cols.push("authors");
-                vals.push(`'${esc(publication.authors || "")}'`);
-            }
-            if (pubCols.has("journal")) {
-                cols.push("journal");
-                vals.push(`'${esc(publication.journal || "")}'`);
-            }
-            if (pubCols.has("publication_date")) {
-                cols.push("publication_date");
-                vals.push(`'${esc(publication.pubdate || "")}'`);
-            } else if (pubCols.has("pubdate")) {
-                cols.push("pubdate");
-                vals.push(`'${esc(publication.pubdate || "")}'`);
-            }
+  // Campos que quieres forzar siempre en el UPDATE del UPSERT
+  const upd = [];
+  if (pubCols.has("contains_promoter_data")) upd.push(`contains_promoter_data=${containsPromoter}`);
+  if (pubCols.has("contains_expression_data")) upd.push(`contains_expression_data=${containsExpression}`);
+  if (pubCols.has("submission_notes")) upd.push(`submission_notes='${esc(combinedNotes)}'`);
+  if (pubCols.has("curation_complete")) upd.push(`curation_complete=${truthyBool(curationComplete)}`);
+  if (pubCols.has("reported_TF")) upd.push(`reported_TF='${esc(tfName)}'`);
+  if (pubCols.has("reported_species") && (siteSpecies || tfSpecies)) {
+    upd.push(`reported_species='${esc(siteSpecies || tfSpecies)}'`);
+  }
 
-            if (cols.length) {
-                sql.push(`
-          INSERT OR IGNORE INTO core_publication (${cols.join(",")})
-          VALUES (${vals.join(",")});
-        `);
-            } else {
-                sql.push(`INSERT OR IGNORE INTO core_publication DEFAULT VALUES;`);
-            }
+  // ✅ UPSERT real por PMID (cambia el target si tu unique es otro)
+  sql.push(`
+    INSERT INTO core_publication (${cols.join(",")})
+    VALUES (${vals.join(",")})
+    ON CONFLICT(pmid) DO UPDATE SET
+      ${upd.length ? upd.join(", ") : "pmid=excluded.pmid"};
+  `);
 
-            const upd = [];
-            if (pubCols.has("contains_promoter_data")) upd.push(`contains_promoter_data=${containsPromoter}`);
-            if (pubCols.has("contains_expression_data")) upd.push(`contains_expression_data=${containsExpression}`);
-            if (pubCols.has("submission_notes")) upd.push(`submission_notes='${esc(combinedNotes)}'`);
-            if (pubCols.has("curation_complete")) upd.push(`curation_complete=${truthyBool(curationComplete)}`);
-            if (pubCols.has("reported_TF")) upd.push(`reported_TF='${esc(tfName)}'`);
-            if (pubCols.has("reported_species") && (siteSpecies || tfSpecies)) upd.push(`reported_species='${esc(siteSpecies || tfSpecies)}'`);
+  // ✅ Guardar publication_id SIEMPRE después del upsert
+  sql.push(`
+    DELETE FROM _tmp_pub;
+    INSERT INTO _tmp_pub(publication_id)
+    SELECT publication_id
+    FROM core_publication
+    WHERE ${pubClause}
+    LIMIT 1;
+  `);
 
-            if (upd.length) {
-                sql.push(`
-          UPDATE core_publication
-          SET ${upd.join(", ")}
-          WHERE ${pubClause};
-        `);
-            }
+  // ✅ “corte” si no se ha podido obtener publication_id (provoca error controlado)
+  // (esto evita que más abajo falle con NOT NULL sin saber por qué)
+  sql.push(`
+    SELECT 1 / CASE
+      WHEN (SELECT COUNT(*) FROM _tmp_pub) = 1 THEN 1
+      ELSE 0
+    END;
+  `);
+}
 
-            sql.push(`
-  DELETE FROM _tmp_pub;
-  INSERT INTO _tmp_pub(publication_id)
-  SELECT publication_id
-  FROM core_publication
-  WHERE ${pubClause}
-  ORDER BY publication_id DESC
-  LIMIT 1;
-`);
-        }
 
         // 2) Ensure genomes exist
         for (const g of genomes) {
@@ -503,12 +503,7 @@ export default function Step7CurationInfo() {
             }
             if (curCols.has("publication_id")) {
                 cols.push("publication_id");
-                vals.push(
-                    `COALESCE(
-                    (SELECT publication_id FROM _tmp_pub LIMIT 1),
-                    (SELECT publication_id FROM core_publication WHERE ${pubClause} LIMIT 1)
-                    )`
-                );
+                vals.push(`(SELECT publication_id FROM _tmp_pub LIMIT 1)`);
             }
 
             // ✅ critical fix: confidence NOT NULL in your DB
