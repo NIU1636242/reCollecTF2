@@ -12,10 +12,6 @@ export default function SummaryPanel() {
     techniques,
   } = useCuration();
 
-  const firstGenome = genomeList[0];
-  const firstUniProt = uniprotList[0];
-  const firstRefseq = refseqList[0];
-
   function techId(t) {
     return typeof t === "string"
       ? t
@@ -70,28 +66,54 @@ export default function SummaryPanel() {
       {/* GENOME & ACCESSION NUMBERS */}
       <div className="mb-4">
         <h4 className="font-semibold text-sky-300">Genome & TF accessions</h4>
-        {firstGenome || firstUniProt || firstRefseq ? (
-          <ul className="text-sm mt-1 space-y-1">
-            {firstGenome && (
-              <li>
-                <strong>Genome:</strong> {firstGenome.accession}
-              </li>
+
+        {((genomeList?.length || 0) + (uniprotList?.length || 0) + (refseqList?.length || 0)) > 0 ? (
+          <div className="text-sm mt-1 space-y-2">
+
+            {genomeList?.length > 0 && (
+              <div>
+                <div className="font-semibold">Genomes:</div>
+                <ul className="list-disc pl-4 max-h-24 overflow-auto space-y-1">
+                  {genomeList.map((g, i) => (
+                    <li key={`g-${i}`}>
+                      <span className="font-mono">{g.accession}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-            {firstUniProt && (
-              <li>
-                <strong>UniProt:</strong> {firstUniProt.accession}
-              </li>
+
+            {uniprotList?.length > 0 && (
+              <div>
+                <div className="font-semibold">UniProt:</div>
+                <ul className="list-disc pl-4 max-h-24 overflow-auto space-y-1">
+                  {uniprotList.map((u, i) => (
+                    <li key={`u-${i}`}>
+                      <span className="font-mono">{u.accession}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-            {firstRefseq && (
-              <li>
-                <strong>RefSeq:</strong> {firstRefseq.accession}
-              </li>
+
+            {refseqList?.length > 0 && (
+              <div>
+                <div className="font-semibold">RefSeq:</div>
+                <ul className="list-disc pl-4 max-h-24 overflow-auto space-y-1">
+                  {refseqList.map((r, i) => (
+                    <li key={`r-${i}`}>
+                      <span className="font-mono">{r.accession}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-          </ul>
+          </div>
         ) : (
           <p className="text-sm text-gray-400">None added</p>
         )}
       </div>
+
 
       {/* EXPERIMENTAL METHODS (STEP3) */}
       <div className="mb-4">
