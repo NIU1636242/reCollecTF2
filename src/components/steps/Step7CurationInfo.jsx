@@ -260,6 +260,9 @@ export default function Step7CurationInfo() {
         sql.push("DROP TABLE IF EXISTS _tmp_curation;");
         sql.push("CREATE TEMP TABLE _tmp_curation(curation_id INTEGER);");
 
+        sql.push("DROP TABLE IF EXISTS _tmp_pub;");
+        sql.push("CREATE TEMP TABLE _tmp_pub(publication_id INTEGER);");
+
         sql.push("DROP TABLE IF EXISTS _tmp_sites;");
         // NOTE: your DB uses meta_site_id / motif_id; keep meta_site_id temp for convenience
         sql.push("CREATE TEMP TABLE _tmp_sites(site TEXT PRIMARY KEY, site_instance_id INTEGER, curation_siteinstance_id INTEGER, meta_site_id INTEGER);");
@@ -310,17 +313,6 @@ export default function Step7CurationInfo() {
                 sql.push(`INSERT OR IGNORE INTO core_publication DEFAULT VALUES;`);
             }
 
-            // Guardar publication_id en temp (robusto)
-            sql.push(`
-                DELETE FROM _tmp_pub;
-                INSERT INTO _tmp_pub(publication_id)
-                SELECT publication_id
-                FROM core_publication
-                WHERE ${pubClause}
-                ORDER BY publication_id DESC
-                LIMIT 1;
-            `);
-
             const upd = [];
             if (pubCols.has("contains_promoter_data")) upd.push(`contains_promoter_data=${containsPromoter}`);
             if (pubCols.has("contains_expression_data")) upd.push(`contains_expression_data=${containsExpression}`);
@@ -336,6 +328,16 @@ export default function Step7CurationInfo() {
           WHERE ${pubClause};
         `);
             }
+
+            sql.push(`
+  DELETE FROM _tmp_pub;
+  INSERT INTO _tmp_pub(publication_id)
+  SELECT publication_id
+  FROM core_publication
+  WHERE ${pubClause}
+  ORDER BY publication_id DESC
+  LIMIT 1;
+`);
         }
 
         // 2) Ensure genomes exist
