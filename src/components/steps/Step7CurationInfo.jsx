@@ -86,6 +86,23 @@ function pickDefaultForType(type) {
   return "''";
 }
 
+// ✅ NEW: discover which column core_curation.publication_id references in core_publication
+async function getPublicationFkTarget() {
+  // rows: {id, seq, table, from, to, on_update, on_delete, match}
+  const rows = await runQuery(`PRAGMA foreign_key_list(core_curation);`);
+  const fk = rows.find((r) => r.from === "publication_id" && r.table === "core_publication");
+  // If not found, fall back to "publication_id" (legacy)
+  return {
+    table: fk?.table || "core_publication",
+    to: fk?.to || "publication_id",
+  };
+}
+
+function sqlCol(col) {
+  // sqlite identifier escape (very conservative)
+  return `"${String(col).replace(/"/g, '""')}"`;
+}
+
 // --------------------
 // Component
 // --------------------
@@ -135,6 +152,7 @@ export default function Step7CurationInfo() {
     );
   }, [publication, tf, genomeList, uniprotList, refseqList, step4Data, step5Data, loading]);
 
+  // Normalize techniques: supports strings or objects from Step3
   function normalizeTechList(raw) {
     const list = (raw || [])
       .map((t) => {
@@ -172,7 +190,6 @@ export default function Step7CurationInfo() {
     const techCols = await getCols("core_experimentaltechnique");
 
     const hasCurationTfBridge = await tableExists("core_curation_TF_instances");
-
     const siteCols = await getCols("core_siteinstance");
 
     const csiExists = await tableExists("core_curation_siteinstance");
@@ -191,15 +208,18 @@ export default function Step7CurationInfo() {
     const hasGene = await tableExists("core_gene");
     const regCols = hasReg ? await getCols("core_regulation") : new Set();
 
+    // ✅ discover FK target column (THIS is the real fix)
+    const pubFk = await getPublicationFkTarget();
+    const pubTargetCol = pubFk.to; // e.g. "id" or "publication_id" etc.
+
     // -------------------------
-    // Publication identifier clause
+    // Publication identifier clause (for WHERE)
     // -------------------------
     const doiUrl =
       publication.doi && publication.doi !== "No DOI" && isDoi(publication.doi)
         ? `https://doi.org/${publication.doi}`
         : "";
 
-    // IMPORTANTE: NO uses ON CONFLICT(pmid) porque pmid NO es UNIQUE en tu BD (ya lo viste).
     const pubClause =
       (publication.pmid && pubCols.has("pmid") && isPmid(publication.pmid) && `pmid='${esc(publication.pmid)}'`) ||
       (publication.doi && pubCols.has("doi") && isDoi(publication.doi) && `doi='${esc(publication.doi)}'`) ||
@@ -213,7 +233,6 @@ export default function Step7CurationInfo() {
     // Species fields
     // -------------------------
     const firstGenomeOrg = genomeList?.[0]?.organism || genomeList?.[0]?.description || "";
-
     const tfSpecies = strainData?.sameStrainTF ? firstGenomeOrg : (strainData?.organismReportedTF || "");
     const siteSpecies = strainData?.sameStrainGenome ? firstGenomeOrg : (strainData?.organismTFBindingSites || "");
 
@@ -222,7 +241,6 @@ export default function Step7CurationInfo() {
     // -------------------------
     const requiresRevision = revisionReason !== "None";
     const revisionText = requiresRevision ? revisionReason : "";
-
     const combinedNotes = [revisionText ? `Revision reason: ${revisionText}` : null, notes ? notes : null]
       .filter(Boolean)
       .join("\n");
@@ -239,7 +257,6 @@ export default function Step7CurationInfo() {
     const genomes = genomeList || [];
     const uni = uniprotList || [];
     const ref = refseqList || [];
-
     const sites = step4Data.sites || [];
     const annotations = step5Data.annotations || {};
     const regulation = step6Data || {};
@@ -248,27 +265,27 @@ export default function Step7CurationInfo() {
     // SQL generation
     // -------------------------
     const sql = [];
+    sql.push("PRAGMA foreign_keys = ON;");
     sql.push("BEGIN TRANSACTION;");
 
     // temp tables
     sql.push("DROP TABLE IF EXISTS _tmp_curation;");
     sql.push("CREATE TEMP TABLE _tmp_curation(curation_id INTEGER);");
 
-    // CLAVE: _tmp_pub NOT NULL para fallar aquí si algo va mal
+    // ✅ store the *correct* key we must put into core_curation.publication_id
     sql.push("DROP TABLE IF EXISTS _tmp_pub;");
-    sql.push("CREATE TEMP TABLE _tmp_pub(publication_id INTEGER NOT NULL);");
+    sql.push("CREATE TEMP TABLE _tmp_pub(pub_key INTEGER NOT NULL);");
 
     sql.push("DROP TABLE IF EXISTS _tmp_sites;");
     sql.push(
       "CREATE TEMP TABLE _tmp_sites(site TEXT PRIMARY KEY, site_instance_id INTEGER, curation_siteinstance_id INTEGER, meta_site_id INTEGER);"
     );
 
-    // 1) Publication upsert (INSERT OR IGNORE + UPDATE)
+    // 1) Publication insert + update
     {
       const cols = [];
       const vals = [];
 
-      // NO metas publication_id aquí. (Este fue el origen de mucha inestabilidad)
       if (pubCols.has("pmid") && publication.pmid && isPmid(publication.pmid)) {
         cols.push("pmid");
         vals.push(`'${esc(publication.pmid)}'`);
@@ -303,9 +320,9 @@ export default function Step7CurationInfo() {
 
       if (cols.length) {
         sql.push(`
-          INSERT OR IGNORE INTO core_publication (${cols.join(",")})
-          VALUES (${vals.join(",")});
-        `);
+INSERT OR IGNORE INTO core_publication (${cols.join(",")})
+VALUES (${vals.join(",")});
+        `.trim());
       } else {
         sql.push(`INSERT OR IGNORE INTO core_publication DEFAULT VALUES;`);
       }
@@ -316,45 +333,49 @@ export default function Step7CurationInfo() {
       if (pubCols.has("submission_notes")) upd.push(`submission_notes='${esc(combinedNotes)}'`);
       if (pubCols.has("curation_complete")) upd.push(`curation_complete=${truthyBool(curationComplete)}`);
       if (pubCols.has("reported_TF")) upd.push(`reported_TF='${esc(tfName)}'`);
-      if (pubCols.has("reported_species") && (siteSpecies || tfSpecies))
+      if (pubCols.has("reported_species") && (siteSpecies || tfSpecies)) {
         upd.push(`reported_species='${esc(siteSpecies || tfSpecies)}'`);
+      }
 
       if (upd.length) {
         sql.push(`
-          UPDATE core_publication
-          SET ${upd.join(", ")}
-          WHERE ${pubClause};
-        `);
+UPDATE core_publication
+SET ${upd.join(", ")}
+WHERE ${pubClause};
+        `.trim());
       }
 
-      // ✅ FIX DEFINITIVO:
-      // Fuerza publication_id = rowid para esa publicación (rowid nunca es NULL en SQLite)
-      if (pubCols.has("publication_id")) {
+      // ✅ If the FK points to a nullable column (e.g. publication_id) and it is empty, force-fill with rowid
+      // Only do this when the target column is a real column (not rowid).
+      if (pubTargetCol !== "rowid" && pubCols.has(pubTargetCol)) {
         sql.push(`
-          UPDATE core_publication
-          SET publication_id = rowid
-          WHERE ${pubClause};
-        `);
+UPDATE core_publication
+SET ${sqlCol(pubTargetCol)} = COALESCE(${sqlCol(pubTargetCol)}, rowid)
+WHERE ${pubClause};
+        `.trim());
       }
 
-      // Guarda el publication_id (ya es rowid) en _tmp_pub
-      sql.push(`
-        DELETE FROM _tmp_pub;
-        INSERT INTO _tmp_pub(publication_id)
-        SELECT publication_id
-        FROM core_publication
-        WHERE ${pubClause}
-        ORDER BY rowid DESC
-        LIMIT 1;
-      `);
+      // ✅ Save the correct key into _tmp_pub(pub_key)
+      const selectKeyExpr = pubTargetCol === "rowid" ? "rowid" : sqlCol(pubTargetCol);
 
-      // Guard: si no hay 1 fila, revienta AQUÍ
       sql.push(`
-        SELECT 1 / CASE
-          WHEN (SELECT COUNT(*) FROM _tmp_pub) = 1 THEN 1
-          ELSE 0
-        END;
-      `);
+DELETE FROM _tmp_pub;
+INSERT INTO _tmp_pub(pub_key)
+SELECT ${selectKeyExpr}
+FROM core_publication
+WHERE ${pubClause}
+  AND ${selectKeyExpr} IS NOT NULL
+ORDER BY rowid DESC
+LIMIT 1;
+      `.trim());
+
+      // ✅ Hard fail early if we still didn’t get a key
+      sql.push(`
+SELECT 1 / CASE
+  WHEN (SELECT COUNT(*) FROM _tmp_pub) = 1 THEN 1
+  ELSE 0
+END;
+      `.trim());
     }
 
     // 2) Ensure genomes exist
@@ -375,14 +396,10 @@ export default function Step7CurationInfo() {
         vals.push(`'${esc(organism)}'`);
       }
 
-      if (cols.length) {
-        sql.push(`
-          INSERT OR IGNORE INTO core_genome (${cols.join(",")})
-          VALUES (${vals.join(",")});
-        `);
-      } else {
-        sql.push(`INSERT OR IGNORE INTO core_genome DEFAULT VALUES;`);
-      }
+      sql.push(`
+INSERT OR IGNORE INTO core_genome (${cols.join(",")})
+VALUES (${vals.join(",")});
+      `.trim());
     }
 
     // 3) Ensure TF instances exist and are linked to TF
@@ -417,35 +434,31 @@ export default function Step7CurationInfo() {
           vals.push(`(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)`);
         }
 
-        if (cols.length) {
-          sql.push(`
-            INSERT OR IGNORE INTO core_tfinstance (${cols.join(",")})
-            VALUES (${vals.join(",")});
-          `);
-        } else {
-          sql.push(`INSERT OR IGNORE INTO core_tfinstance DEFAULT VALUES;`);
-        }
+        sql.push(`
+INSERT OR IGNORE INTO core_tfinstance (${cols.join(",")})
+VALUES (${vals.join(",")});
+        `.trim());
 
         if (tfiCols.has("TF_id")) {
           if (uniprotAcc && tfiCols.has("uniprot_accession")) {
             sql.push(`
-              UPDATE core_tfinstance
-              SET TF_id=(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)
-              WHERE uniprot_accession='${esc(uniprotAcc)}' AND (TF_id IS NULL OR TF_id='');
-            `);
+UPDATE core_tfinstance
+SET TF_id=(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)
+WHERE uniprot_accession='${esc(uniprotAcc)}' AND (TF_id IS NULL OR TF_id='');
+            `.trim());
           }
           if (refseqAcc && tfiCols.has("refseq_accession")) {
             sql.push(`
-              UPDATE core_tfinstance
-              SET TF_id=(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)
-              WHERE refseq_accession='${esc(refseqAcc)}' AND (TF_id IS NULL OR TF_id='');
-            `);
+UPDATE core_tfinstance
+SET TF_id=(SELECT TF_id FROM core_tf WHERE LOWER(name)=LOWER('${esc(tfName)}') LIMIT 1)
+WHERE refseq_accession='${esc(refseqAcc)}' AND (TF_id IS NULL OR TF_id='');
+            `.trim());
           }
         }
       }
     }
 
-    // 4) Ensure experimental techniques exist (minimal)
+    // 4) Ensure experimental techniques exist
     for (const t of normalizedTechniques) {
       const eco = normalizeEco(t.ecoId);
       if (!eco) continue;
@@ -466,17 +479,13 @@ export default function Step7CurationInfo() {
         vals.push(`'${esc(t.description)}'`);
       }
 
-      if (cols.length) {
-        sql.push(`
-          INSERT OR IGNORE INTO core_experimentaltechnique (${cols.join(",")})
-          VALUES (${vals.join(",")});
-        `);
-      } else {
-        sql.push(`INSERT OR IGNORE INTO core_experimentaltechnique DEFAULT VALUES;`);
-      }
+      sql.push(`
+INSERT OR IGNORE INTO core_experimentaltechnique (${cols.join(",")})
+VALUES (${vals.join(",")});
+      `.trim());
     }
 
-    // 5) Create curation (fill NOT NULL, including confidence)
+    // 5) Create curation (publication_id MUST come from _tmp_pub(pub_key))
     {
       const cols = [];
       const vals = [];
@@ -514,18 +523,19 @@ export default function Step7CurationInfo() {
         vals.push(`datetime('now')`);
       }
 
-      // 🔥 Ahora publication_id sale SIEMPRE de _tmp_pub (NOT NULL)
+      // ✅ this is the key line: ALWAYS from _tmp_pub(pub_key)
       if (curCols.has("publication_id")) {
         cols.push("publication_id");
-        vals.push(`(SELECT publication_id FROM _tmp_pub LIMIT 1)`);
+        vals.push(`(SELECT pub_key FROM _tmp_pub LIMIT 1)`);
       }
 
+      // confidence not null
       if (curCols.has("confidence") && !cols.includes("confidence")) {
         cols.push("confidence");
         vals.push(`'not specified'`);
       }
 
-      // Fill any remaining NOT NULL columns with safe defaults
+      // Fill any remaining NOT NULL columns with defaults
       for (const nn of curNN) {
         if (cols.includes(nn)) continue;
         if (nn === "curation_id") continue;
@@ -534,51 +544,51 @@ export default function Step7CurationInfo() {
       }
 
       sql.push(`
-        INSERT INTO core_curation (${cols.join(",")})
-        VALUES (${vals.join(",")});
-      `);
+INSERT INTO core_curation (${cols.join(",")})
+VALUES (${vals.join(",")});
+      `.trim());
 
       sql.push(`
-        DELETE FROM _tmp_curation;
-        INSERT INTO _tmp_curation(curation_id)
-        SELECT curation_id FROM core_curation
-        ORDER BY curation_id DESC
-        LIMIT 1;
-      `);
+DELETE FROM _tmp_curation;
+INSERT INTO _tmp_curation(curation_id)
+SELECT curation_id FROM core_curation
+ORDER BY curation_id DESC
+LIMIT 1;
+      `.trim());
     }
 
-    // 6) Link curation ↔ TF_instances (safe)
+    // 6) Link curation ↔ TF_instances
     if (hasCurationTfBridge) {
       for (const u of uni) {
         const acc = (u?.accession || "").trim();
         if (!acc) continue;
         sql.push(`
-          INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
-          SELECT
-            (SELECT curation_id FROM _tmp_curation),
-            TF_instance_id
-          FROM core_tfinstance
-          WHERE uniprot_accession='${esc(acc)}'
-            AND TF_instance_id IS NOT NULL;
-        `);
+INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
+SELECT
+  (SELECT curation_id FROM _tmp_curation),
+  TF_instance_id
+FROM core_tfinstance
+WHERE uniprot_accession='${esc(acc)}'
+  AND TF_instance_id IS NOT NULL;
+        `.trim());
       }
 
       for (const r of ref) {
         const acc = (r?.accession || "").trim();
         if (!acc) continue;
         sql.push(`
-          INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
-          SELECT
-            (SELECT curation_id FROM _tmp_curation),
-            TF_instance_id
-          FROM core_tfinstance
-          WHERE refseq_accession='${esc(acc)}'
-            AND TF_instance_id IS NOT NULL;
-        `);
+INSERT OR IGNORE INTO core_curation_TF_instances (curation_id, tfinstance_id)
+SELECT
+  (SELECT curation_id FROM _tmp_curation),
+  TF_instance_id
+FROM core_tfinstance
+WHERE refseq_accession='${esc(acc)}'
+  AND TF_instance_id IS NOT NULL;
+        `.trim());
       }
     }
 
-    // 7) Sites: siteinstance + metasite + curation_siteinstance + techniques + regulation
+    // 7) Sites
     for (const site of sites) {
       const hit = getSelectedHitForSite(site, step4Data);
       if (!hit) continue;
@@ -588,7 +598,7 @@ export default function Step7CurationInfo() {
       const end = Number(hit.end) + 1;
       const strand = hit.strand || "+";
 
-      // Insert siteinstance
+      // siteinstance
       {
         const cols = [];
         const vals = [];
@@ -611,35 +621,35 @@ export default function Step7CurationInfo() {
         }
 
         sql.push(`
-          INSERT INTO core_siteinstance (${cols.join(",")})
-          VALUES (${vals.join(",")});
-        `);
+INSERT INTO core_siteinstance (${cols.join(",")})
+VALUES (${vals.join(",")});
+        `.trim());
 
         sql.push(`
-          INSERT OR REPLACE INTO _tmp_sites(site, site_instance_id, curation_siteinstance_id, meta_site_id)
-          VALUES ('${esc(site)}', last_insert_rowid(), NULL, NULL);
-        `);
+INSERT OR REPLACE INTO _tmp_sites(site, site_instance_id, curation_siteinstance_id, meta_site_id)
+VALUES ('${esc(site)}', last_insert_rowid(), NULL, NULL);
+        `.trim());
       }
 
-      // Insert metasite
+      // metasite
       if (hasMetaSite) {
         const hasName = metaCols.has("name");
         sql.push(`
-          INSERT INTO core_metasite (meta_site_id, delegate_id${hasName ? ", name" : ""})
-          SELECT
-            (SELECT IFNULL(MAX(meta_site_id),0)+1 FROM core_metasite),
-            (SELECT IFNULL(MAX(meta_site_id),0)+1 FROM core_metasite)
-            ${hasName ? `, '${esc(site)}'` : ""};
-        `);
+INSERT INTO core_metasite (meta_site_id, delegate_id${hasName ? ", name" : ""})
+SELECT
+  (SELECT IFNULL(MAX(meta_site_id),0)+1 FROM core_metasite),
+  (SELECT IFNULL(MAX(meta_site_id),0)+1 FROM core_metasite)
+  ${hasName ? `, '${esc(site)}'` : ""};
+        `.trim());
 
         sql.push(`
-          UPDATE _tmp_sites
-          SET meta_site_id = (SELECT MAX(meta_site_id) FROM core_metasite)
-          WHERE site='${esc(site)}';
-        `);
+UPDATE _tmp_sites
+SET meta_site_id = (SELECT MAX(meta_site_id) FROM core_metasite)
+WHERE site='${esc(site)}';
+        `.trim());
       }
 
-      // Insert curation_siteinstance
+      // curation_siteinstance
       {
         const ann = annotations?.[site] || {};
         const tfType = ann.tfType || "not specified";
@@ -700,18 +710,18 @@ export default function Step7CurationInfo() {
         }
 
         sql.push(`
-          INSERT INTO core_curation_siteinstance (${cols.join(",")})
-          VALUES (${vals.join(",")});
-        `);
+INSERT INTO core_curation_siteinstance (${cols.join(",")})
+VALUES (${vals.join(",")});
+        `.trim());
 
         sql.push(`
-          UPDATE _tmp_sites
-          SET curation_siteinstance_id = (SELECT last_insert_rowid())
-          WHERE site='${esc(site)}';
-        `);
+UPDATE _tmp_sites
+SET curation_siteinstance_id = (SELECT last_insert_rowid())
+WHERE site='${esc(site)}';
+        `.trim());
       }
 
-      // Link techniques
+      // techniques bridge
       if (hasTechBridge) {
         const techMap = annotations?.[site]?.techniques || {};
         for (const t of normalizedTechniques) {
@@ -720,19 +730,19 @@ export default function Step7CurationInfo() {
           if (!techMap?.[eco]) continue;
 
           sql.push(`
-            INSERT OR IGNORE INTO core_curation_siteinstance_experimental_techniques
-              (curation_siteinstance_id, experimentaltechnique_id)
-            SELECT
-              (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
-              technique_id
-            FROM core_experimentaltechnique
-            WHERE EO_term='${esc(eco)}'
-              AND technique_id IS NOT NULL;
-          `);
+INSERT OR IGNORE INTO core_curation_siteinstance_experimental_techniques
+  (curation_siteinstance_id, experimentaltechnique_id)
+SELECT
+  (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
+  technique_id
+FROM core_experimentaltechnique
+WHERE EO_term='${esc(eco)}'
+  AND technique_id IS NOT NULL;
+          `.trim());
         }
       }
 
-      // Regulation
+      // regulation
       if (hasReg && hasGene) {
         const regGenes = regulation?.[site]?.regulatedGenes || [];
         for (const g of regGenes) {
@@ -747,14 +757,14 @@ export default function Step7CurationInfo() {
           if (!csiFkCol) continue;
 
           sql.push(`
-            INSERT OR IGNORE INTO core_regulation (${csiFkCol}, gene_id)
-            SELECT
-              (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
-              gene_id
-            FROM core_gene
-            WHERE locus_tag='${esc(locus)}'
-              AND gene_id IS NOT NULL;
-          `);
+INSERT OR IGNORE INTO core_regulation (${csiFkCol}, gene_id)
+SELECT
+  (SELECT curation_siteinstance_id FROM _tmp_sites WHERE site='${esc(site)}'),
+  gene_id
+FROM core_gene
+WHERE locus_tag='${esc(locus)}'
+  AND gene_id IS NOT NULL;
+          `.trim());
         }
       }
     }
@@ -762,14 +772,14 @@ export default function Step7CurationInfo() {
     // 8) Update publication completion flag again (optional)
     if (pubCols.has("curation_complete")) {
       sql.push(`
-        UPDATE core_publication
-        SET curation_complete=${truthyBool(curationComplete)}
-        WHERE ${pubClause};
-      `);
+UPDATE core_publication
+SET curation_complete=${truthyBool(curationComplete)}
+WHERE ${pubClause};
+      `.trim());
     }
 
     sql.push("COMMIT;");
-    return sql.join("\n");
+    return sql.join("\n\n") + "\n";
   }
 
   async function handleSubmit() {
@@ -805,7 +815,11 @@ export default function Step7CurationInfo() {
       <div className="bg-surface border border-border rounded p-4 space-y-3">
         <div>
           <label className="block font-medium mb-1">Revision required</label>
-          <select className="form-control" value={revisionReason} onChange={(e) => setRevisionReason(e.target.value)}>
+          <select
+            className="form-control"
+            value={revisionReason}
+            onChange={(e) => setRevisionReason(e.target.value)}
+          >
             {REVISION_REASONS.map((r) => (
               <option key={r.value} value={r.value}>
                 {r.label}
@@ -818,10 +832,16 @@ export default function Step7CurationInfo() {
         </div>
 
         <label className="inline-flex items-start gap-2 text-sm">
-          <input type="checkbox" checked={curationComplete} onChange={(e) => setCurationComplete(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={curationComplete}
+            onChange={(e) => setCurationComplete(e.target.checked)}
+          />
           <span>
             <div className="font-medium">Curation for this paper is complete</div>
-            <div className="text-xs text-muted">Check if there are no more curations pending for this paper.</div>
+            <div className="text-xs text-muted">
+              Check if there are no more curations pending for this paper.
+            </div>
           </span>
         </label>
 
@@ -840,12 +860,21 @@ export default function Step7CurationInfo() {
       </div>
 
       <div className="flex items-center gap-3">
-        <button className="btn" onClick={handleSubmit} disabled={!canSubmit} title={!canSubmit ? "Complete required steps first." : ""}>
+        <button
+          className="btn"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          title={!canSubmit ? "Complete required steps first." : ""}
+        >
           {loading ? "Submitting..." : "Submit curation"}
         </button>
       </div>
 
-      {msg && <div className={`text-sm ${msg.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>{msg}</div>}
+      {msg && (
+        <div className={`text-sm ${msg.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>
+          {msg}
+        </div>
+      )}
     </div>
   );
 }
