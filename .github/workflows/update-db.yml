@@ -26,13 +26,26 @@ jobs:
         run: |
           echo "PRAGMA foreign_keys = ON;" > queries.sql
           echo "${{ github.event.inputs.queries }}" >> queries.sql
-          cat queries.sql
+
+          echo "===== queries.sql (numbered, lines 1-200) ====="
+          nl -ba queries.sql | sed -n '1,200p'
+
+          echo "===== queries.sql (numbered, lines 20-120) ====="
+          nl -ba queries.sql | sed -n '20,120p'
+
 
       - name: Run SQL queries
         if: ${{ github.event.inputs.queries != 'false' }}
         run: |
           set -e
           sqlite3 ./public/CollecTF.db.gz < queries.sql
+
+      - name: Debug SQL around failing lines (always)
+        if: always()
+        run: |
+          echo "===== queries.sql (numbered, lines 1-140) ====="
+          nl -ba queries.sql | sed -n '1,140p'
+
 
       - name: Delete SQL queries file
         if: ${{ github.event.inputs.queries != 'false' }}
