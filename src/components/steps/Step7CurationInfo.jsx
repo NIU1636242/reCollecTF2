@@ -267,7 +267,7 @@ export default function Step7CurationInfo() {
         // NOTE: your DB uses meta_site_id / motif_id; keep meta_site_id temp for convenience
         sql.push("CREATE TEMP TABLE _tmp_sites(site TEXT PRIMARY KEY, site_instance_id INTEGER, curation_siteinstance_id INTEGER, meta_site_id INTEGER);");
         
-        // 1) Publication UPSERT (robusto) + guardar publication_id en _tmp_pub
+        // 1) Publication upsert (SIN ON CONFLICT)
 {
   const cols = [];
   const vals = [];
@@ -304,44 +304,51 @@ export default function Step7CurationInfo() {
     vals.push(`'${esc(publication.pubdate || "")}'`);
   }
 
-  // Campos que quieres forzar siempre en el UPDATE del UPSERT
+  // Insert “base” (no falla si ya existe)
+  if (cols.length) {
+    sql.push(`
+INSERT OR IGNORE INTO core_publication (${cols.join(",")})
+VALUES (${vals.join(",")});
+    `);
+  } else {
+    sql.push(`INSERT OR IGNORE INTO core_publication DEFAULT VALUES;`);
+  }
+
+  // Update “campos de curation” (siempre)
   const upd = [];
   if (pubCols.has("contains_promoter_data")) upd.push(`contains_promoter_data=${containsPromoter}`);
   if (pubCols.has("contains_expression_data")) upd.push(`contains_expression_data=${containsExpression}`);
   if (pubCols.has("submission_notes")) upd.push(`submission_notes='${esc(combinedNotes)}'`);
   if (pubCols.has("curation_complete")) upd.push(`curation_complete=${truthyBool(curationComplete)}`);
   if (pubCols.has("reported_TF")) upd.push(`reported_TF='${esc(tfName)}'`);
-  if (pubCols.has("reported_species") && (siteSpecies || tfSpecies)) {
-    upd.push(`reported_species='${esc(siteSpecies || tfSpecies)}'`);
+  if (pubCols.has("reported_species") && (siteSpecies || tfSpecies)) upd.push(`reported_species='${esc(siteSpecies || tfSpecies)}'`);
+
+  if (upd.length) {
+    sql.push(`
+UPDATE core_publication
+SET ${upd.join(", ")}
+WHERE ${pubClause};
+    `);
   }
 
-  // ✅ UPSERT real por PMID (cambia el target si tu unique es otro)
+  // Guardar publication_id en temp (y forzar fallo si no existe)
   sql.push(`
-    INSERT INTO core_publication (${cols.join(",")})
-    VALUES (${vals.join(",")})
-    ON CONFLICT(pmid) DO UPDATE SET
-      ${upd.length ? upd.join(", ") : "pmid=excluded.pmid"};
-  `);
+DELETE FROM _tmp_pub;
+INSERT INTO _tmp_pub(publication_id)
+SELECT publication_id
+FROM core_publication
+WHERE ${pubClause}
+ORDER BY publication_id DESC
+LIMIT 1;
 
-  // ✅ Guardar publication_id SIEMPRE después del upsert
-  sql.push(`
-    DELETE FROM _tmp_pub;
-    INSERT INTO _tmp_pub(publication_id)
-    SELECT publication_id
-    FROM core_publication
-    WHERE ${pubClause}
-    LIMIT 1;
-  `);
-
-  // ✅ “corte” si no se ha podido obtener publication_id (provoca error controlado)
-  // (esto evita que más abajo falle con NOT NULL sin saber por qué)
-  sql.push(`
-    SELECT 1 / CASE
-      WHEN (SELECT COUNT(*) FROM _tmp_pub) = 1 THEN 1
-      ELSE 0
-    END;
+-- Si no hay publication_id, aborta aquí (divide by zero)
+SELECT 1 / CASE
+  WHEN (SELECT COUNT(*) FROM _tmp_pub) = 1 THEN 1
+  ELSE 0
+END;
   `);
 }
+
 
 
         // 2) Ensure genomes exist
