@@ -267,10 +267,17 @@ export default function Step7CurationInfo() {
         // NOTE: your DB uses meta_site_id / motif_id; keep meta_site_id temp for convenience
         sql.push("CREATE TEMP TABLE _tmp_sites(site TEXT PRIMARY KEY, site_instance_id INTEGER, curation_siteinstance_id INTEGER, meta_site_id INTEGER);");
         
-        // 1) Publication upsert (SIN ON CONFLICT)
+        // 1) Publication upsert (minimal columns) + GUARANTEE publication_id NOT NULL
 {
   const cols = [];
   const vals = [];
+
+  // ⚠️ Si existe publication_id en el esquema, lo forzamos nosotros
+  // (porque en tu BD puede NO autogenerarse y quedarse en NULL)
+  if (pubCols.has("publication_id")) {
+    cols.push("publication_id");
+    vals.push(`(SELECT IFNULL(MAX(publication_id),0)+1 FROM core_publication)`);
+  }
 
   if (pubCols.has("pmid") && publication.pmid && isPmid(publication.pmid)) {
     cols.push("pmid");
@@ -304,17 +311,12 @@ export default function Step7CurationInfo() {
     vals.push(`'${esc(publication.pubdate || "")}'`);
   }
 
-  // Insert “base” (no falla si ya existe)
-  if (cols.length) {
-    sql.push(`
-INSERT OR IGNORE INTO core_publication (${cols.join(",")})
-VALUES (${vals.join(",")});
-    `);
-  } else {
-    sql.push(`INSERT OR IGNORE INTO core_publication DEFAULT VALUES;`);
-  }
+  sql.push(`
+    INSERT OR IGNORE INTO core_publication (${cols.join(",")})
+    VALUES (${vals.join(",")});
+  `);
 
-  // Update “campos de curation” (siempre)
+  // ✅ Actualiza campos “extra” (como ya hacías)
   const upd = [];
   if (pubCols.has("contains_promoter_data")) upd.push(`contains_promoter_data=${containsPromoter}`);
   if (pubCols.has("contains_expression_data")) upd.push(`contains_expression_data=${containsExpression}`);
@@ -325,27 +327,40 @@ VALUES (${vals.join(",")});
 
   if (upd.length) {
     sql.push(`
-UPDATE core_publication
-SET ${upd.join(", ")}
-WHERE ${pubClause};
+      UPDATE core_publication
+      SET ${upd.join(", ")}
+      WHERE ${pubClause};
     `);
   }
 
-  // Guardar publication_id en temp (y forzar fallo si no existe)
-  sql.push(`
-DELETE FROM _tmp_pub;
-INSERT INTO _tmp_pub(publication_id)
-SELECT publication_id
-FROM core_publication
-WHERE ${pubClause}
-ORDER BY publication_id DESC
-LIMIT 1;
+  // ✅ CLAVE: si existe una fila (nueva o antigua) con publication_id NULL, la arreglamos.
+  // Si publication_id es NULL, lo rellenamos con rowid (SQLite siempre lo tiene).
+  if (pubCols.has("publication_id")) {
+    sql.push(`
+      UPDATE core_publication
+      SET publication_id = COALESCE(publication_id, rowid)
+      WHERE ${pubClause};
+    `);
+  }
 
--- Si no hay publication_id, aborta aquí (divide by zero)
-SELECT 1 / CASE
-  WHEN (SELECT COUNT(*) FROM _tmp_pub) = 1 THEN 1
-  ELSE 0
-END;
+  // ✅ Guardamos publication_id de forma segura (solo NO NULL)
+  sql.push(`
+    DELETE FROM _tmp_pub;
+    INSERT INTO _tmp_pub(publication_id)
+    SELECT publication_id
+    FROM core_publication
+    WHERE ${pubClause}
+      AND publication_id IS NOT NULL
+    ORDER BY publication_id DESC
+    LIMIT 1;
+  `);
+
+  // ✅ Si no hay publication_id, abortamos aquí (mejor que petar en core_curation)
+  sql.push(`
+    SELECT 1 / CASE
+      WHEN (SELECT COUNT(*) FROM _tmp_pub) = 1 THEN 1
+      ELSE 0
+    END;
   `);
 }
 
@@ -512,6 +527,7 @@ END;
                 cols.push("publication_id");
                 vals.push(`(SELECT publication_id FROM _tmp_pub LIMIT 1)`);
             }
+
 
             // ✅ critical fix: confidence NOT NULL in your DB
             if (curCols.has("confidence") && !cols.includes("confidence")) {
