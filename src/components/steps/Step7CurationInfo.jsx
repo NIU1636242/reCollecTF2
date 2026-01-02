@@ -272,6 +272,10 @@ export default function Step7CurationInfo() {
             const cols = [];
             const vals = [];
 
+            if (pubCols.has("publication_id")) {
+                cols.push("publication_id");
+                vals.push(`(SELECT IFNULL(MAX(publication_id),0)+1 FROM core_publication)`);
+            }
             if (pubCols.has("pmid") && publication.pmid && isPmid(publication.pmid)) {
                 cols.push("pmid");
                 vals.push(`'${esc(publication.pmid)}'`);
@@ -499,7 +503,12 @@ export default function Step7CurationInfo() {
             }
             if (curCols.has("publication_id")) {
                 cols.push("publication_id");
-                vals.push(`(SELECT publication_id FROM _tmp_pub LIMIT 1)`);
+                vals.push(
+                    `COALESCE(
+                    (SELECT publication_id FROM _tmp_pub LIMIT 1),
+                    (SELECT publication_id FROM core_publication WHERE ${pubClause} LIMIT 1)
+                    )`
+                );
             }
 
             // ✅ critical fix: confidence NOT NULL in your DB
