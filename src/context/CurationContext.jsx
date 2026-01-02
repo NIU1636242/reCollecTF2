@@ -39,6 +39,7 @@ export function CurationProvider({ children }) {
 
   const [step6Data, setStep6Data] = useState(null);
 
+  const [step7Data, setStep7Data] = useState(null);
 
 
   const goToNextStep = () => setCurrentStep((s) => s + 1); //anar al següent pas
@@ -70,6 +71,8 @@ export function CurationProvider({ children }) {
         setStep5Data,
         step6Data,
         setStep6Data,
+        step7Data,
+        setStep7Data,
         genomes,
         setGenomes
       }}
