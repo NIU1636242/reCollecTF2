@@ -72,3 +72,12 @@ jobs:
           else
             echo "No changes to commit."
           fi
+          
+      - name: Trigger Vercel deploy
+        if: ${{ github.event.inputs.queries != 'false' }}
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          echo "Triggering Vercel deployment..."
+          curl -X POST "$VERCEL_DEPLOY_HOOK"
+
