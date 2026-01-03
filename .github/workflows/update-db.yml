@@ -4,53 +4,58 @@ on:
   workflow_dispatch:
     inputs:
       queries:
-        description: 'Write SQL queries'
-        required: false
-        default: 'false'
+        description: "SQL queries to apply (single string)"
+        required: true
+        type: string
 
 permissions:
   contents: write
-  actions: write
+
+concurrency:
+  group: update-db
+  cancel-in-progress: false
 
 jobs:
   update:
-    name: Update
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Install tools
-        if: ${{ github.event.inputs.queries != 'false' }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y sqlite3
+          sudo apt-get install -y sqlite3 gzip
 
-      - name: Create queries.sql (enable FK + user SQL)
-        if: ${{ github.event.inputs.queries != 'false' }}
+      - name: Write queries.sql (FK + SQL)
         run: |
-          rm -f queries.sql
           echo "PRAGMA foreign_keys = ON;" > queries.sql
-          echo "${{ github.event.inputs.queries }}" >> queries.sql
-
-          echo "===== queries.sql (numbered, lines 1-200) ====="
+          printf "%s\n" "${{ inputs.queries }}" >> queries.sql
+          echo "===== queries.sql preview ====="
           nl -ba queries.sql | sed -n '1,200p'
 
-      - name: Run SQL queries
-        if: ${{ github.event.inputs.queries != 'false' }}
+      - name: Unzip DB
+        run: |
+          test -f public/CollecTF.db.gz
+          gunzip -f public/CollecTF.db.gz
+          test -f public/CollecTF.db
+
+      - name: Apply SQL
         run: |
           set -e
-          sqlite3 ./public/CollecTF.db.gz < queries.sql
+          sqlite3 public/CollecTF.db < queries.sql
 
-      - name: Delete queries.sql
-        if: ${{ github.event.inputs.queries != 'false' }}
+      - name: Zip DB back
+        run: |
+          gzip -f public/CollecTF.db
+          test -f public/CollecTF.db.gz
+
+      - name: Cleanup
         run: rm -f queries.sql
 
-      - name: Commit updated database
-        if: ${{ github.event.inputs.queries != 'false' }}
+      - name: Commit & push updated database
         env:
           TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
@@ -58,7 +63,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add ./public/CollecTF.db.gz
+          git add public/CollecTF.db.gz
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
@@ -68,27 +73,3 @@ jobs:
           git commit -m "Update database via workflow_dispatch"
           git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
           git push origin main
-
-      - name: Trigger GitHub Pages deploy workflow
-        if: ${{ github.event.inputs.queries != 'false' }}
-        env:
-          TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: |
-          echo "Triggering deploy.yml..."
-          curl -L -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${TOKEN}" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches \
-            -d '{"ref":"main"}'
-
-      - name: Trigger Vercel deploy (optional)
-        if: ${{ github.event.inputs.queries != 'false' }}
-        env:
-          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
-        run: |
-          if [ -n "$VERCEL_DEPLOY_HOOK" ]; then
-            echo "Triggering Vercel deployment..."
-            curl -X POST "$VERCEL_DEPLOY_HOOK"
-          else
-            echo "No VERCEL_DEPLOY_HOOK set. Skipping."
-          fi
