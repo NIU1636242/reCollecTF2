@@ -8,6 +8,10 @@ on:
         required: false
         default: 'false'
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   update:
     name: Update
@@ -16,23 +20,24 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-        
-      - name: Install SQLite
-        if: ${{ github.event.inputs.queries != 'false' }}
-        run: sudo apt-get install sqlite3 
+        with:
+          fetch-depth: 0
 
-      - name: Create SQL queries file and activate FK
+      - name: Install tools
         if: ${{ github.event.inputs.queries != 'false' }}
         run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Create queries.sql (enable FK + user SQL)
+        if: ${{ github.event.inputs.queries != 'false' }}
+        run: |
+          rm -f queries.sql
           echo "PRAGMA foreign_keys = ON;" > queries.sql
           echo "${{ github.event.inputs.queries }}" >> queries.sql
 
           echo "===== queries.sql (numbered, lines 1-200) ====="
           nl -ba queries.sql | sed -n '1,200p'
-
-          echo "===== queries.sql (numbered, lines 20-120) ====="
-          nl -ba queries.sql | sed -n '20,120p'
-
 
       - name: Run SQL queries
         if: ${{ github.event.inputs.queries != 'false' }}
@@ -40,44 +45,50 @@ jobs:
           set -e
           sqlite3 ./public/CollecTF.db.gz < queries.sql
 
-      - name: Debug SQL around failing lines (always)
-        if: always()
-        run: |
-          echo "===== queries.sql (numbered, lines 1-140) ====="
-          nl -ba queries.sql | sed -n '1,140p'
-
-
-      - name: Delete SQL queries file
+      - name: Delete queries.sql
         if: ${{ github.event.inputs.queries != 'false' }}
-        run: rm queries.sql
+        run: rm -f queries.sql
 
       - name: Commit updated database
         if: ${{ github.event.inputs.queries != 'false' }}
-        env: 
+        env:
           TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
+          set -e
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
           git add ./public/CollecTF.db.gz
-          if ! git diff --cached --quiet; then
-            git commit -m "Update database via workflow_dispatch"
-            git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
-            git push origin main
-            curl -L \
-            -X POST \
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update database via workflow_dispatch"
+          git remote set-url origin https://x-access-token:${TOKEN}@github.com/${{ github.repository }}
+          git push origin main
+
+      - name: Trigger GitHub Pages deploy workflow
+        if: ${{ github.event.inputs.queries != 'false' }}
+        env:
+          TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          echo "Triggering deploy.yml..."
+          curl -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${TOKEN}" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches \
             -d '{"ref":"main"}'
-          else
-            echo "No changes to commit."
-          fi
-          
-      - name: Trigger Vercel deploy
+
+      - name: Trigger Vercel deploy (optional)
         if: ${{ github.event.inputs.queries != 'false' }}
         env:
           VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
         run: |
-          echo "Triggering Vercel deployment..."
-          curl -X POST "$VERCEL_DEPLOY_HOOK"
-
+          if [ -n "$VERCEL_DEPLOY_HOOK" ]; then
+            echo "Triggering Vercel deployment..."
+            curl -X POST "$VERCEL_DEPLOY_HOOK"
+          else
+            echo "No VERCEL_DEPLOY_HOOK set. Skipping."
+          fi
