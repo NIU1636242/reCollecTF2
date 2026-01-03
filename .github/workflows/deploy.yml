@@ -1,14 +1,14 @@
 name: Deploy
 
 on:
-  # Para pushes humanos normales (cambios en frontend, etc.)
-  push:
-    branches: [ main ]
-
-  # Para el pipeline automático: al terminar Update DB
+  # Para despliegues automáticos al finalizar Update DB
   workflow_run:
     workflows: ["Update DB"]
     types: [completed]
+
+  # Para cuando tú haces push manual de código
+  push:
+    branches: [ main ]
 
   workflow_dispatch:
 
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   deploy:
-    # Si viene de workflow_run, solo si fue success
+    # Si viene de workflow_run, solo si Update DB terminó bien
     if: |
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
@@ -46,13 +46,13 @@ jobs:
       - name: Build project
         run: npm run build
 
-      # Asegura que la DB que está en public llega a dist
-      - name: Copy updated database into dist
+      # Si tu build NO copia el .gz desde /public por algún motivo, lo forzamos
+      - name: Ensure DB is in dist
         run: |
           test -f ./public/CollecTF.db.gz
           cp ./public/CollecTF.db.gz ./dist/CollecTF.db.gz
 
-      - name: Deploy to GitHub Pages (gh-pages branch)
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
