@@ -21,6 +21,16 @@ export default function Step3ExperimentalMethods() {
   const [error, setError] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
 
+  // Preset function (like CollecTF)
+  const PRESET_FUNCTIONS = [
+    { value: "Detection of binding", label: "Detection of binding" },
+    { value: "Assessment of expression", label: "Assessment of expression" },
+    { value: "In-silico prediction", label: "In-silico prediction" },
+  ];
+
+  const [presetFunction, setPresetFunction] = useState("");
+
+
   // Manual ECO code (new)
   const [newEcoCode, setNewEcoCode] = useState("");
 
@@ -114,6 +124,7 @@ export default function Step3ExperimentalMethods() {
     setTechDescription("");
     setSelectedCategory("");
     setNewEcoCode("");
+    setPresetFunction("");
   }
 
   // Create a new technique manually
@@ -132,25 +143,28 @@ export default function Step3ExperimentalMethods() {
       return;
     }
 
+    if (!presetFunction) {
+      setError("Please select a preset function.");
+      return;
+    }
+
     if (!selectedCategory) {
       setError("Please select a category.");
       return;
     }
 
+    const presetValue = presetFunction ? `'${esc(presetFunction)}'` : "NULL";
+
     const sql = `
       INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
-      VALUES (NULL, '${esc(techDescription)}', NULL, '${esc(raw)}');
+      VALUES (NULL, '${esc(techDescription)}', ${presetValue}, '${esc(raw)}');
 
       INSERT INTO core_experimentaltechnique_categories (experimentaltechnique_id, experimentaltechniquecategory_id)
       VALUES (
-        (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(raw)}'),
-        ${Number(selectedCategory)}
+      (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(raw)}'),
+      ${Number(selectedCategory)}
       );
     `;
-
-    // NOTE: keeping your original behavior: SQL is prepared for Step7 deploy (not executed here).
-    // If you DO want to execute now, uncomment:
-    // await runQuery(sql);
 
     // Store technique as object (name fallback to ECO code)
     setTechniques([...techniques, { ecoId: raw, name: raw }]);
@@ -234,6 +248,23 @@ export default function Step3ExperimentalMethods() {
               value={newEcoCode}
               onChange={(e) => setNewEcoCode(e.target.value)}
             />
+          </div>
+
+          {/* Preset function */}
+          <div>
+            <label className="block font-medium">Preset function</label>
+            <select
+              className="form-control"
+              value={presetFunction}
+              onChange={(e) => setPresetFunction(e.target.value)}
+            >
+              <option value="">---------</option>
+              {PRESET_FUNCTIONS.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Category */}
