@@ -71,58 +71,68 @@ export default function Step6GeneRegulation() {
   // FIND NEARBY GENES (±150 nt chain logic)
   // -----------------------------
   function findGenesForHit(acc, hitStart1, hitEnd1) {
-  const genome = (genomes || []).find((g) => g.acc === acc);
-  if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
+    const genome = (genomes || []).find((g) => g.acc === acc);
+    if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
 
-  const genes = genome.genes;
-  const hitEnd = hitEnd1;
+    const genes = genome.genes;
+    const hitStart = Number(hitStart1);
+    const hitEnd = Number(hitEnd1);
 
-  // IMPORTANT: anchor to the first gene on the RIGHT (start >= hitEnd)
-  let anchorIdx = genes.findIndex((g) => Number(g.start) >= Number(hitEnd));
-  if (anchorIdx === -1) anchorIdx = genes.length - 1;
+    // 1) If the hit falls inside (or overlaps) a gene, anchor to that gene
+    let anchorIdx = genes.findIndex((g) => {
+      const gs = Number(g.start);
+      const ge = Number(g.end);
+      return hitStart <= ge && hitEnd >= gs; // overlap condition
+    });
 
-  const out = [];
-  const pushUnique = (g) => {
-    if (!g) return;
-    if (!out.some((x) => x.locus === g.locus)) {
-      out.push({
-        locus: g.locus || "",
-        geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
-        product: g.product || "",
-        start: g.start,
-        end: g.end,
-        strand: g.strand || "+",
-      });
+    // 2) Otherwise, anchor to the first gene on the RIGHT (start >= hitEnd), as before
+    if (anchorIdx === -1) {
+      anchorIdx = genes.findIndex((g) => Number(g.start) >= hitEnd);
+      if (anchorIdx === -1) anchorIdx = genes.length - 1;
     }
-  };
 
-  pushUnique(genes[anchorIdx]);
+    const out = [];
+    const pushUnique = (g) => {
+      if (!g) return;
+      if (!out.some((x) => x.locus === g.locus)) {
+        out.push({
+          locus: g.locus || "",
+          geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
+          product: g.product || "",
+          start: g.start,
+          end: g.end,
+          strand: g.strand || "+",
+        });
+      }
+    };
 
-  // extend left by gene-to-gene gaps
-  let i = anchorIdx - 1;
-  while (i >= 0) {
-    const current = genes[i];
-    const next = genes[i + 1];
-    const gap = Number(next.start) - Number(current.end);
-    if (gap > 150) break;
-    pushUnique(current);
-    i--;
+    pushUnique(genes[anchorIdx]);
+
+    // extend left by gene-to-gene gaps
+    let i = anchorIdx - 1;
+    while (i >= 0) {
+      const current = genes[i];
+      const next = genes[i + 1];
+      const gap = Number(next.start) - Number(current.end);
+      if (gap > 150) break;
+      pushUnique(current);
+      i--;
+    }
+
+    // extend right by gene-to-gene gaps
+    i = anchorIdx + 1;
+    while (i < genes.length) {
+      const prev = genes[i - 1];
+      const current = genes[i];
+      const gap = Number(current.start) - Number(prev.end);
+      if (gap > 150) break;
+      pushUnique(current);
+      i++;
+    }
+
+    out.sort((a, b) => Number(a.start) - Number(b.start));
+    return out;
   }
-
-  // extend right by gene-to-gene gaps
-  i = anchorIdx + 1;
-  while (i < genes.length) {
-    const prev = genes[i - 1];
-    const current = genes[i];
-    const gap = Number(current.start) - Number(prev.end);
-    if (gap > 150) break;
-    pushUnique(current);
-    i++;
-  }
-
-  out.sort((a, b) => Number(a.start) - Number(b.start));
-  return out;
-}
 
   // -----------------------------
   // TOGGLE GENE SELECTION (only if expressionEnabled)
@@ -169,7 +179,7 @@ export default function Step6GeneRegulation() {
   return (
     <div className="space-y-6 text-sm">
       <h2 className="text-2xl font-bold">
-      Step 6 – Gene Regulation
+        Step 6 – Gene Regulation
       </h2>
       {!expressionEnabled && (
         <div className="bg-surface border border-border rounded p-4 text-sm text-muted">
