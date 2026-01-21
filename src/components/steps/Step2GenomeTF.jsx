@@ -197,6 +197,7 @@ export default function Step2GenomeTF() {
     };
 
     setTf(newObj);
+    setSearchName(newObj.name);
     setTfRow(null);
     setShowCreateForm(false);
   }
@@ -656,18 +657,6 @@ export default function Step2GenomeTF() {
       {showCreateForm && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Create New TF</h3>
-
-          <button
-            type="button"
-            className="text-blue-400 hover:text-blue-300 underline text-sm"
-            onClick={() => {
-              setShowCreateForm(false);
-              setFinalError("");
-            }}
-          >
-            Cancel
-          </button>
-
           <div>
             <label className="block font-medium mb-1">TF Name</label>
             <div className="flex gap-2">
@@ -742,9 +731,23 @@ export default function Step2GenomeTF() {
             />
           </div>
 
-          <button className="btn" onClick={saveNewTF}>
-            Save TF
-          </button>
+          <div className="flex gap-2">
+            <button type="button" className="btn" onClick={saveNewTF}>
+              Save TF
+            </button>
+
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setShowCreateForm(false);
+                setFinalError("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+
         </div>
       )}
 
