@@ -8,8 +8,8 @@ export default function Step6GeneRegulation() {
     step6Data,
     setStep6Data,
     goToNextStep,
-    genomes,     // <-- lo volvemos a traer para fallback
-    strainData,
+    genomes, // needed to recompute nearby genes exactly like Step4
+    strainData, // from Step2
   } = useCuration();
 
   const expressionEnabled = !!strainData?.expressionInfo;
@@ -19,7 +19,7 @@ export default function Step6GeneRegulation() {
   const exactHits = step4Data?.exactHits || {};
   const fuzzyHits = step4Data?.fuzzyHits || {};
 
-  // Nuevo: calculado en Step4 (si existe)
+  // we keep this if it exists (for older sessions / quick UI), but Step6 will recompute anyway
   const selectedBySite = step4Data?.selectedBySite || {};
 
   const [regulation, setRegulation] = useState({});
@@ -49,9 +49,10 @@ export default function Step6GeneRegulation() {
   }
 
   // -----------------------------
-  // FALLBACK: reconstruir hit desde choice/exactHits/fuzzyHits (Step4 antiguo)
+  // Reconstruct selected hit from Step4 choice (authoritative)
+  // (selectedBySite can be missing/stale; choice+hits is always enough)
   // -----------------------------
-  function getSelectedHitFallback(site) {
+  function getSelectedHit(site) {
     const sel = choice?.[site];
     if (!sel) return null;
 
@@ -71,93 +72,151 @@ export default function Step6GeneRegulation() {
   }
 
   // -----------------------------
-  // MISMA LÓGICA QUE STEP4 para nearby genes (fallback)
+  // Nearby genes — EXACTLY the same logic as your Step4 (python-like)
   // -----------------------------
-  function findGenesForHitFallback(acc, hitStart1, hitEnd1) {
+  function distIntervals(aStart, aEnd, bStart, bEnd) {
+    return Math.max(Number(aStart), Number(bStart)) - Math.min(Number(aEnd), Number(bEnd));
+  }
+
+  function distGeneToSite(g, siteStart, siteEnd) {
+    return distIntervals(g.start, g.end, siteStart, siteEnd);
+  }
+
+  function distGeneToGene(ga, gb) {
+    return distIntervals(ga.start, ga.end, gb.start, gb.end);
+  }
+
+  function findGenesForHit(acc, hitStart1, hitEnd1) {
     const genome = (genomes || []).find((g) => g.acc === acc);
-    if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
+    if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
-    const genes = genome.genes;
-    const hitStart = Number(hitStart1);
-    const hitEnd = Number(hitEnd1);
+    const genes = genome.genes; // already sorted by start in Step4 loader
 
-    // 1) overlaps => anchor dentro del gen
-    let anchorIdx = genes.findIndex((g) => {
-      const gs = Number(g.start);
-      const ge = Number(g.end);
-      return hitStart <= ge && hitEnd >= gs;
-    });
+    // normalize to 0-based for computations (same as Step4)
+    const siteStart = Math.min(Number(hitStart1), Number(hitEnd1)) - 1;
+    const siteEnd = Math.max(Number(hitStart1), Number(hitEnd1)) - 1;
 
-    // 2) si no, primer gen a la derecha
-    if (anchorIdx === -1) {
-      anchorIdx = genes.findIndex((g) => Number(g.start) >= hitEnd);
-      if (anchorIdx === -1) anchorIdx = genes.length - 1;
+    const nearbyGenesRaw = [];
+
+    // Partition genes into left (< siteStart), right (> siteEnd), and overlap
+    let leftCount = 0;
+    for (let i = 0; i < genes.length; i++) {
+      if (Number(genes[i].end) < siteStart) leftCount++;
+      else break;
     }
 
-    const out = [];
-    const pushUnique = (g) => {
-      if (!g) return;
-      if (!out.some((x) => x.locus === g.locus)) {
-        out.push({
-          locus: g.locus || "",
-          geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
-          product: g.product || "",
-          start: g.start,
-          end: g.end,
-          strand: g.strand || "+",
-        });
+    let rightCount = 0;
+    for (let i = genes.length - 1; i >= 0; i--) {
+      if (Number(genes[i].start) > siteEnd) rightCount++;
+      else break;
+    }
+
+    const leftGenes = genes.slice(0, leftCount);
+    const rightGenes = genes.slice(genes.length - rightCount);
+    const overlapGenes = genes.slice(leftCount, genes.length - rightCount);
+
+    // 1) overlap genes always included (site falls inside a gene too)
+    for (const g of overlapGenes) nearbyGenesRaw.push(g);
+
+    // 2) LEFT: nearest left gene; only if strand == '-'; then chain left with same strand + dist < 150
+    if (leftGenes.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+
+      for (let i = 0; i < leftGenes.length; i++) {
+        const d = distGeneToSite(leftGenes[i], siteStart, siteEnd);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
       }
-    };
 
-    pushUnique(genes[anchorIdx]);
+      const nearestLeft = leftGenes[bestIdx];
+      if ((nearestLeft.strand || "+") === "-") {
+        nearbyGenesRaw.push(nearestLeft);
 
-    // expand left by gaps <=150
-    let i = anchorIdx - 1;
-    while (i >= 0) {
-      const current = genes[i];
-      const next = genes[i + 1];
-      const gap = Number(next.start) - Number(current.end);
-      if (gap > 150) break;
-      pushUnique(current);
-      i--;
+        let i = bestIdx;
+        while (
+          i > 0 &&
+          (leftGenes[i - 1].strand || "+") === "-" &&
+          distGeneToGene(leftGenes[i - 1], leftGenes[i]) < 150
+        ) {
+          nearbyGenesRaw.push(leftGenes[i - 1]);
+          i -= 1;
+        }
+      }
     }
 
-    // expand right by gaps <=150
-    i = anchorIdx + 1;
-    while (i < genes.length) {
-      const prev = genes[i - 1];
-      const current = genes[i];
-      const gap = Number(current.start) - Number(prev.end);
-      if (gap > 150) break;
-      pushUnique(current);
-      i++;
+    // 3) RIGHT: nearest right gene; only if strand == '+'; then chain right with same strand + dist < 150
+    if (rightGenes.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+
+      for (let i = 0; i < rightGenes.length; i++) {
+        const d = distGeneToSite(rightGenes[i], siteStart, siteEnd);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+
+      const nearestRight = rightGenes[bestIdx];
+      if ((nearestRight.strand || "+") === "+") {
+        nearbyGenesRaw.push(nearestRight);
+
+        let i = bestIdx;
+        while (
+          i < rightGenes.length - 1 &&
+          (rightGenes[i + 1].strand || "+") === "+" &&
+          distGeneToGene(rightGenes[i], rightGenes[i + 1]) < 150
+        ) {
+          nearbyGenesRaw.push(rightGenes[i + 1]);
+          i += 1;
+        }
+      }
     }
 
-    out.sort((a, b) => Number(a.start) - Number(b.start));
-    return out;
+    // 4) If none collected, add nearest gene globally
+    if (nearbyGenesRaw.length === 0) {
+      let best = genes[0];
+      let bestDist = distGeneToSite(best, siteStart, siteEnd);
+
+      for (let i = 1; i < genes.length; i++) {
+        const d = distGeneToSite(genes[i], siteStart, siteEnd);
+        if (d < bestDist) {
+          bestDist = d;
+          best = genes[i];
+        }
+      }
+      nearbyGenesRaw.push(best);
+    }
+
+    // Deduplicate by locus and map to UI shape (same as Step4 tables expect)
+    const seen = new Set();
+    const result = [];
+
+    for (const g of nearbyGenesRaw) {
+      const locus = g?.locus || "";
+      if (!locus) continue; // keep consistent with Step4 display
+      if (seen.has(locus)) continue;
+      seen.add(locus);
+
+      result.push({
+        locus,
+        geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
+        product: g.product || "",
+        start: g.start,
+        end: g.end,
+        strand: g.strand || "+",
+      });
+    }
+
+    result.sort((a, b) => Number(a.start) - Number(b.start));
+    return result;
   }
 
   // -----------------------------
-  // NUEVO: obtener bundle preferentemente de selectedBySite,
-  // si no existe => fallback al cálculo antiguo
-  // Bundle: { kind: "hit"|"none", hit, nearbyGenes }
-  // -----------------------------
-  function getSelectedBundle(site) {
-    const bundle = selectedBySite?.[site];
-
-    // Caso nuevo OK
-    if (bundle && (bundle.kind === "hit" || bundle.kind === "none")) return bundle;
-
-    // Caso antiguo: reconstruimos
-    const hit = getSelectedHitFallback(site);
-    if (!hit) return { kind: "none", hit: null, nearbyGenes: [] };
-
-    const nearbyGenes = findGenesForHitFallback(hit.acc, hit.start + 1, hit.end + 1);
-    return { kind: "hit", hit, nearbyGenes };
-  }
-
-  // -----------------------------
-  // TOGGLE GENE SELECTION
+  // Toggle gene selection (only if expressionEnabled)
   // -----------------------------
   function toggleGene(site, gene) {
     if (!expressionEnabled) return;
@@ -181,7 +240,7 @@ export default function Step6GeneRegulation() {
   }
 
   // -----------------------------
-  // CONFIRM
+  // Confirm
   // -----------------------------
   function handleConfirm() {
     setStep6Data(regulation);
@@ -195,7 +254,7 @@ export default function Step6GeneRegulation() {
   }, [sites, activeSite]);
 
   // -----------------------------
-  // RENDER
+  // Render
   // -----------------------------
   return (
     <div className="space-y-6 text-sm">
@@ -215,8 +274,8 @@ export default function Step6GeneRegulation() {
           <div className="border border-border rounded overflow-hidden">
             {sites.map((s) => {
               const selected = activeSite === s;
-              const bundle = getSelectedBundle(s);
-              const hasHit = bundle?.kind === "hit" && !!bundle?.hit;
+              const hit = getSelectedHit(s);
+              const hasHit = !!hit;
 
               return (
                 <button
@@ -240,9 +299,11 @@ export default function Step6GeneRegulation() {
       )}
 
       {visibleSites.map((site) => {
-        const bundle = getSelectedBundle(site);
+        // If Step4 stored selectedBySite we can still show it, but genes are recomputed below.
+        const bundle = selectedBySite?.[site];
+        const hit = getSelectedHit(site) || bundle?.hit || null;
 
-        if (!bundle || bundle.kind !== "hit" || !bundle.hit) {
+        if (!hit) {
           return (
             <div key={site} className="bg-surface border border-border rounded p-4 text-muted">
               No genomic mapping selected for <span className="font-mono">{site}</span> in Step 4.
@@ -250,8 +311,7 @@ export default function Step6GeneRegulation() {
           );
         }
 
-        const hit = bundle.hit;
-        const genes = Array.isArray(bundle.nearbyGenes) ? bundle.nearbyGenes : [];
+        const genes = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
 
         return (
           <div key={site} className="bg-surface border border-border rounded p-4 space-y-3">
