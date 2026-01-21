@@ -8,8 +8,8 @@ export default function Step6GeneRegulation() {
     step6Data,
     setStep6Data,
     goToNextStep,
-    genomes, // por si necesitamos fallback (casos antiguos sin selectedBySite)
-    strainData, // from Step 2 (expressionInfo flag)
+    genomes,     // <-- lo volvemos a traer para fallback
+    strainData,
   } = useCuration();
 
   const expressionEnabled = !!strainData?.expressionInfo;
@@ -19,7 +19,7 @@ export default function Step6GeneRegulation() {
   const exactHits = step4Data?.exactHits || {};
   const fuzzyHits = step4Data?.fuzzyHits || {};
 
-  // NUEVO: leído directamente de Step4 (si existe)
+  // Nuevo: calculado en Step4 (si existe)
   const selectedBySite = step4Data?.selectedBySite || {};
 
   const [regulation, setRegulation] = useState({});
@@ -49,15 +49,115 @@ export default function Step6GeneRegulation() {
   }
 
   // -----------------------------
-  // NUEVO: obtener el "paquete" elegido en Step4
-  // { kind: "hit" | "none", hit: {...} | null, nearbyGenes: [...] }
+  // FALLBACK: reconstruir hit desde choice/exactHits/fuzzyHits (Step4 antiguo)
   // -----------------------------
-  function getSelectedBundle(site) {
-  return selectedBySite?.[site] || { kind: "none", hit: null, nearbyGenes: [] };
+  function getSelectedHitFallback(site) {
+    const sel = choice?.[site];
+    if (!sel) return null;
+
+    if (sel.startsWith("ex-")) {
+      const idx = parseInt(sel.split("-")[1], 10);
+      const hit = exactHits?.[site]?.[idx];
+      return hit && hit !== "none" ? hit : null;
+    }
+
+    if (sel.startsWith("fz-")) {
+      const idx = parseInt(sel.split("-")[1], 10);
+      const hit = fuzzyHits?.[site]?.[idx];
+      return hit && hit !== "none" ? hit : null;
+    }
+
+    return null;
   }
 
   // -----------------------------
-  // TOGGLE GENE SELECTION (only if expressionEnabled)
+  // MISMA LÓGICA QUE STEP4 para nearby genes (fallback)
+  // -----------------------------
+  function findGenesForHitFallback(acc, hitStart1, hitEnd1) {
+    const genome = (genomes || []).find((g) => g.acc === acc);
+    if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
+
+    const genes = genome.genes;
+    const hitStart = Number(hitStart1);
+    const hitEnd = Number(hitEnd1);
+
+    // 1) overlaps => anchor dentro del gen
+    let anchorIdx = genes.findIndex((g) => {
+      const gs = Number(g.start);
+      const ge = Number(g.end);
+      return hitStart <= ge && hitEnd >= gs;
+    });
+
+    // 2) si no, primer gen a la derecha
+    if (anchorIdx === -1) {
+      anchorIdx = genes.findIndex((g) => Number(g.start) >= hitEnd);
+      if (anchorIdx === -1) anchorIdx = genes.length - 1;
+    }
+
+    const out = [];
+    const pushUnique = (g) => {
+      if (!g) return;
+      if (!out.some((x) => x.locus === g.locus)) {
+        out.push({
+          locus: g.locus || "",
+          geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
+          product: g.product || "",
+          start: g.start,
+          end: g.end,
+          strand: g.strand || "+",
+        });
+      }
+    };
+
+    pushUnique(genes[anchorIdx]);
+
+    // expand left by gaps <=150
+    let i = anchorIdx - 1;
+    while (i >= 0) {
+      const current = genes[i];
+      const next = genes[i + 1];
+      const gap = Number(next.start) - Number(current.end);
+      if (gap > 150) break;
+      pushUnique(current);
+      i--;
+    }
+
+    // expand right by gaps <=150
+    i = anchorIdx + 1;
+    while (i < genes.length) {
+      const prev = genes[i - 1];
+      const current = genes[i];
+      const gap = Number(current.start) - Number(prev.end);
+      if (gap > 150) break;
+      pushUnique(current);
+      i++;
+    }
+
+    out.sort((a, b) => Number(a.start) - Number(b.start));
+    return out;
+  }
+
+  // -----------------------------
+  // NUEVO: obtener bundle preferentemente de selectedBySite,
+  // si no existe => fallback al cálculo antiguo
+  // Bundle: { kind: "hit"|"none", hit, nearbyGenes }
+  // -----------------------------
+  function getSelectedBundle(site) {
+    const bundle = selectedBySite?.[site];
+
+    // Caso nuevo OK
+    if (bundle && (bundle.kind === "hit" || bundle.kind === "none")) return bundle;
+
+    // Caso antiguo: reconstruimos
+    const hit = getSelectedHitFallback(site);
+    if (!hit) return { kind: "none", hit: null, nearbyGenes: [] };
+
+    const nearbyGenes = findGenesForHitFallback(hit.acc, hit.start + 1, hit.end + 1);
+    return { kind: "hit", hit, nearbyGenes };
+  }
+
+  // -----------------------------
+  // TOGGLE GENE SELECTION
   // -----------------------------
   function toggleGene(site, gene) {
     if (!expressionEnabled) return;
