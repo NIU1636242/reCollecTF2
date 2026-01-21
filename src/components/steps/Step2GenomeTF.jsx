@@ -25,7 +25,7 @@ export default function Step2GenomeTF() {
   const [searchName, setSearchName] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [tfRow, setTfRow] = useState(null); //nombre TF completo
-  
+
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTFName, setNewTFName] = useState("");
   const [tfDesc, setTfDesc] = useState("");
@@ -72,6 +72,7 @@ export default function Step2GenomeTF() {
       } else {
         setShowCreateForm(true);
         setNewTFName(tf.name || "");
+        setSearchName(tf.name || "");
         setTfDesc(tf.description || "");
         setSelectedFamily(tf.family_id || "");
         setShowNewFamilyForm(tf.isNewFamily || false);
@@ -429,7 +430,7 @@ export default function Step2GenomeTF() {
     setGenomeInput("");
     setGenomeSuggestions([]);
   }
-  
+
   //Llegir input. Si està a la DB ho mostra, si no, executa la funció de la API
   async function handleUniprotEnter() {
     const acc = uniprotInput.trim();
@@ -656,6 +657,17 @@ export default function Step2GenomeTF() {
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Create New TF</h3>
 
+          <button
+            type="button"
+            className="text-blue-400 hover:text-blue-300 underline text-sm"
+            onClick={() => {
+              setShowCreateForm(false);
+              setFinalError("");
+            }}
+          >
+            Cancel
+          </button>
+
           <div>
             <label className="block font-medium mb-1">TF Name</label>
             <div className="flex gap-2">
@@ -741,7 +753,7 @@ export default function Step2GenomeTF() {
         <h3 className="text-lg font-semibold">Genome NCBI accession number</h3>
         <p className="text-sm text-muted">
           Paste the NCBI GenBank genome accession for the closest species or
-          strain (e.g. NC_000913.2).
+          strain.
         </p>
 
         <input
@@ -754,7 +766,7 @@ export default function Step2GenomeTF() {
               handleGenomeEnter();
             }
           }}
-          placeholder="NC_000913.2"
+          placeholder="Example: NC_000913.2"
         />
 
         {genomeSuggestions.length > 0 && (
@@ -822,7 +834,7 @@ export default function Step2GenomeTF() {
 
         {!sameStrainGenome && (
           <div className="mt-4 space-y-1">
-            <label className="block font-medium text-sm">
+            <label className="block font-medium text-sm text-sky-300">
               Organism TF binding sites are reported in
             </label>
 
@@ -844,7 +856,7 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF UniProt accession number</h3>
         <p className="text-sm text-muted">
-          Paste the UniProt accession for the TF (e.g. Q87KN2).
+          Paste the UniProt accession for the TF.
         </p>
 
         <input
@@ -857,7 +869,7 @@ export default function Step2GenomeTF() {
               handleUniprotEnter();
             }
           }}
-          placeholder="Q87KN2"
+          placeholder="Example: Q87KN2"
         />
 
         {uniprotSuggestions.length > 0 && (
@@ -914,7 +926,7 @@ export default function Step2GenomeTF() {
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF NCBI RefSeq accession</h3>
         <p className="text-sm text-muted">
-          Enter RefSeq TF protein accession (e.g. WP_000037239).
+          Enter RefSeq TF protein accession.
         </p>
 
         <input
@@ -927,7 +939,7 @@ export default function Step2GenomeTF() {
               handleRefseqEnter();
             }
           }}
-          placeholder="WP_000037239"
+          placeholder="Example: WP_000037239"
         />
 
         {refseqSuggestions.length > 0 && (
@@ -994,7 +1006,7 @@ export default function Step2GenomeTF() {
 
         {!sameStrainTF && (
           <div className="mt-4 space-y-1">
-            <label className="block font-medium text-sm">
+            <label className="block font-medium text-sm text-sky-300">
               Organism of origin for reported TF
             </label>
 
