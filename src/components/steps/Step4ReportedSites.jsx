@@ -126,6 +126,8 @@ export default function Step4ReportedSites() {
 
   const [selectedBySite, setSelectedBySite] = useState({});
 
+  const [fuzzyLoadingBySite, setFuzzyLoadingBySite] = useState({});
+
   // -----------------------------
   // RESTORE state when coming back
   // -----------------------------
@@ -446,8 +448,12 @@ export default function Step4ReportedSites() {
   // -----------------------------
   function isCompleted(site) {
     const c = choice?.[site];
-    return typeof c === "string" && (c.startsWith("ex-") || c.startsWith("fz-"));
+    return (
+      typeof c === "string" &&
+      (c.startsWith("ex-") || c.startsWith("fz-") || c === "none-both")
+    );
   }
+
 
   const allCompleted = useMemo(() => {
     if (!sites?.length) return false;
@@ -509,6 +515,8 @@ export default function Step4ReportedSites() {
   // SEARCH FUZZY (up to 2 mismatches)
   // -----------------------------
   function findFuzzy(site) {
+    setFuzzyLoadingBySite((p) => ({ ...p, [site]: true }));
+
     const L = site.length;
     const rc = revComp(site);
     const found = [];
@@ -537,6 +545,8 @@ export default function Step4ReportedSites() {
     setFuzzyHits((p) => ({ ...p, [site]: found }));
     setShowFuzzy(true);
     setAccordion((p) => ({ ...p, a3: true }));
+
+    setFuzzyLoadingBySite((p) => ({ ...p, [site]: false }));
   }
 
   // -----------------------------
@@ -645,8 +655,8 @@ export default function Step4ReportedSites() {
           </div>
 
           {!allCompleted && (
-            <div className="text-xs text-muted mt-2">
-              Select one valid mapping (exact or mismatch) for every site before continuing.
+            <div className="mt-3 p-3 rounded border border-border bg-muted text-sm font-semibold">
+              ⚠️ Select one valid mapping (exact or mismatch) for every site before continuing.
             </div>
           )}
         </div>
@@ -744,6 +754,7 @@ export default function Step4ReportedSites() {
                         checked={choice[site] === "none"}
                         onChange={() => {
                           setChoice((p) => ({ ...p, [site]: "none" }));
+                          setAccordion((p) => ({ ...p, a2: false })); // cerrar acordeón Exact Matches
                           setActiveSite(site);
                           findFuzzy(site);
                         }}
@@ -777,6 +788,12 @@ export default function Step4ReportedSites() {
                 return (
                   <div key={site} className="border border-border rounded p-3 space-y-2">
                     <div className="font-semibold text-accent">{site}</div>
+
+                    {fuzzyLoadingBySite?.[site] && (
+                      <div className="mt-2 p-3 rounded border border-border bg-muted text-sm font-semibold">
+                        Searching for inexact matches, please wait...
+                      </div>
+                    )}
 
                     {hasNone && <div className="text-xs text-muted">No mismatch hits were found.</div>}
 
