@@ -151,11 +151,10 @@ export default function Step5SiteAnnotation() {
 
   return (
     <div className="space-y-8">
+    <h2 className="text-2xl font-bold">
+      Step 5 – Site annotation
+    </h2>
       <div className="bg-surface border border-border rounded p-4">
-        <div className="flex justify-between w-full font-semibold mb-3">
-          <span>Site annotation</span>
-        </div>
-
         {/* Scroll container so many techniques never overlap */}
         <div className="overflow-x-auto">
           <table className="min-w-max w-full text-xs border-collapse">

@@ -168,10 +168,9 @@ export default function Step6GeneRegulation() {
   // -----------------------------
   return (
     <div className="space-y-6 text-sm">
-      <div className="flex items-center justify-between">
-        <h2 className="font-semibold">Gene regulation (experimental support)</h2>
-      </div>
-
+      <h2 className="text-2xl font-bold">
+      Step 6 – Gene Regulation
+      </h2>
       {!expressionEnabled && (
         <div className="bg-surface border border-border rounded p-4 text-sm text-muted">
           Expression data was not indicated in Step 2, so gene regulation cannot be curated for this manuscript.

@@ -468,10 +468,12 @@ export default function Step4ReportedSites() {
   // -----------------------------
   return (
     <div className="space-y-8">
+      <h2 className="text-2xl font-bold">
+      Step 4 – Reported Sites
+      </h2>
       {/* ACCORDION 1 — INPUT */}
       <div className="bg-surface border border-border rounded p-4">
         <button className="flex justify-between w-full font-semibold mb-3" onClick={() => toggleAcc("a1")}>
-          <span>Reported sites</span>
           <span>{accordion.a1 ? "▲" : "▼"}</span>
         </button>
 

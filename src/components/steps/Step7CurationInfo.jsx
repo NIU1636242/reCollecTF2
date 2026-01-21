@@ -131,10 +131,10 @@ END;
         inputs: { queries: sqlString },
       });
 
-      setMsg("✅ Enviado: se ha intentado añadir TF (+ family si hacía falta) a la base de datos.");
+      setMsg("Sended: se ha intentado añadir TF (+ family si hacía falta) a la base de datos.");
     } catch (e) {
       console.error(e);
-      setMsg(`❌ Error: ${e?.message || String(e)}`);
+      setMsg(`Error: ${e?.message || String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -203,7 +203,7 @@ END;
       </div>
 
       {msg && (
-        <div className={`text-sm ${msg.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>
+        <div className={`text-sm ${msg.startsWith("Tot correcte") ? "text-green-400" : "text-red-400"}`}>
           {msg}
         </div>
       )}
