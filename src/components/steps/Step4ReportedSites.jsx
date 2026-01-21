@@ -286,65 +286,151 @@ export default function Step4ReportedSites() {
   }, [genomeList]);
 
   // -----------------------------
-  // Nearby genes anchored to RIGHT + chain expansion
+  // Nearby genes — MATCH Python logic (Match.set_nearby_genes)
   // -----------------------------
+  function distIntervals(aStart, aEnd, bStart, bEnd) {
+    // same as python: max(a.start,b.start) - min(a.end,b.end)
+    return Math.max(Number(aStart), Number(bStart)) - Math.min(Number(aEnd), Number(bEnd));
+  }
+
+  function distGeneToSite(g, siteStart, siteEnd) {
+    return distIntervals(g.start, g.end, siteStart, siteEnd);
+  }
+
+  function distGeneToGene(ga, gb) {
+    return distIntervals(ga.start, ga.end, gb.start, gb.end);
+  }
+
   function findGenesForHit(acc, hitStart1, hitEnd1) {
     const genome = genomes.find((g) => g.acc === acc);
     if (!genome || !genome.genes || genome.genes.length === 0) return [];
 
-    const genes = genome.genes;
-    const hitStart = Number(hitStart1);
-    const hitEnd = Number(hitEnd1);
+    const genes = genome.genes; // already sorted by start
 
-    // 1) If the hit falls inside (or overlaps) a gene, anchor to that gene
-    let anchorIdx = genes.findIndex((g) => {
-      const gs = Number(g.start);
-      const ge = Number(g.end);
-      return hitStart <= ge && hitEnd >= gs; // overlap condition
-    });
+    // IMPORTANT:
+    // In the UI we print hit.start+1 / hit.end+1 (1-based),
+    // Python stores start/end 0-based internally and prints +1.
+    // So normalize incoming coords to 0-based for computations.
+    const siteStart = Math.min(Number(hitStart1), Number(hitEnd1)) - 1;
+    const siteEnd = Math.max(Number(hitStart1), Number(hitEnd1)) - 1;
 
-    // 2) Otherwise, anchor to the first gene on the RIGHT (start >= hitEnd), as before
-    if (anchorIdx === -1) {
-      anchorIdx = genes.findIndex((g) => Number(g.start) >= hitEnd);
-      if (anchorIdx === -1) anchorIdx = genes.length - 1;
+    const nearbyGenesRaw = [];
+
+    // Partition genes into left (< siteStart), right (> siteEnd), and overlap
+    // (overlap includes "site falls inside a gene")
+    let leftCount = 0;
+    for (let i = 0; i < genes.length; i++) {
+      if (Number(genes[i].end) < siteStart) leftCount++;
+      else break;
     }
 
+    let rightCount = 0;
+    for (let i = genes.length - 1; i >= 0; i--) {
+      if (Number(genes[i].start) > siteEnd) rightCount++;
+      else break;
+    }
 
-    const result = [];
-    const pushUnique = (g) => {
-      if (!g) return;
-      if (!result.some((r) => r.locus === g.locus)) {
-        result.push({
-          locus: g.locus || "",
-          geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
-          product: g.product || "",
-          start: g.start,
-          end: g.end,
-          strand: g.strand || "+",
-        });
+    const leftGenes = genes.slice(0, leftCount);
+    const rightGenes = genes.slice(genes.length - rightCount);
+    const overlapGenes = genes.slice(leftCount, genes.length - rightCount);
+
+    // 1) genes overlapping the site are ALWAYS included first
+    for (const g of overlapGenes) nearbyGenesRaw.push(g);
+
+    // 2) LEFT side: pick nearest left gene; include only if strand == '-'
+    if (leftGenes.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < leftGenes.length; i++) {
+        const d = distGeneToSite(leftGenes[i], siteStart, siteEnd);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
       }
-    };
 
-    pushUnique(genes[anchorIdx]);
+      const nearestLeft = leftGenes[bestIdx];
+      if ((nearestLeft.strand || "+") === "-") {
+        nearbyGenesRaw.push(nearestLeft);
 
-    let i = anchorIdx - 1;
-    while (i >= 0) {
-      const current = genes[i];
-      const next = genes[i + 1];
-      const gap = Number(next.start) - Number(current.end);
-      if (gap > 150) break;
-      pushUnique(current);
-      i--;
+        // expand to the left while:
+        // - previous gene exists
+        // - same strand '-'
+        // - dist between consecutive genes < 150
+        let i = bestIdx;
+        while (
+          i > 0 &&
+          (leftGenes[i - 1].strand || "+") === "-" &&
+          distGeneToGene(leftGenes[i - 1], leftGenes[i]) < 150
+        ) {
+          nearbyGenesRaw.push(leftGenes[i - 1]);
+          i -= 1;
+        }
+      }
     }
 
-    i = anchorIdx + 1;
-    while (i < genes.length) {
-      const prev = genes[i - 1];
-      const current = genes[i];
-      const gap = Number(current.start) - Number(prev.end);
-      if (gap > 150) break;
-      pushUnique(current);
-      i++;
+    // 3) RIGHT side: pick nearest right gene; include only if strand == '+'
+    if (rightGenes.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < rightGenes.length; i++) {
+        const d = distGeneToSite(rightGenes[i], siteStart, siteEnd);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+
+      const nearestRight = rightGenes[bestIdx];
+      if ((nearestRight.strand || "+") === "+") {
+        nearbyGenesRaw.push(nearestRight);
+
+        // expand to the right while:
+        // - next gene exists
+        // - same strand '+'
+        // - dist between consecutive genes < 150
+        let i = bestIdx;
+        while (
+          i < rightGenes.length - 1 &&
+          (rightGenes[i + 1].strand || "+") === "+" &&
+          distGeneToGene(rightGenes[i], rightGenes[i + 1]) < 150
+        ) {
+          nearbyGenesRaw.push(rightGenes[i + 1]);
+          i += 1;
+        }
+      }
+    }
+
+    // 4) If nothing collected, add nearest gene globally
+    if (nearbyGenesRaw.length === 0) {
+      let best = genes[0];
+      let bestDist = distGeneToSite(best, siteStart, siteEnd);
+      for (let i = 1; i < genes.length; i++) {
+        const d = distGeneToSite(genes[i], siteStart, siteEnd);
+        if (d < bestDist) {
+          bestDist = d;
+          best = genes[i];
+        }
+      }
+      nearbyGenesRaw.push(best);
+    }
+
+    // Deduplicate by locus and map to the UI shape (keep your existing fields)
+    const seen = new Set();
+    const result = [];
+    for (const g of nearbyGenesRaw) {
+      const locus = g?.locus || "";
+      if (seen.has(locus)) continue;
+      seen.add(locus);
+
+      result.push({
+        locus,
+        geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
+        product: g.product || "",
+        start: g.start,
+        end: g.end,
+        strand: g.strand || "+",
+      });
     }
 
     result.sort((a, b) => Number(a.start) - Number(b.start));
@@ -480,9 +566,8 @@ export default function Step4ReportedSites() {
   // -----------------------------
   return (
     <div className="space-y-8">
-      <h2 className="text-2xl font-bold">
-        Step 4 – Reported Sites
-      </h2>
+      <h2 className="text-2xl font-bold">Step 4 – Reported Sites</h2>
+
       {/* ACCORDION 1 — INPUT */}
       <div className="bg-surface border border-border rounded p-4">
         <button className="flex justify-between w-full font-semibold mb-3" onClick={() => toggleAcc("a1")}>
