@@ -167,8 +167,14 @@ export default function Step3ExperimentalMethods() {
     `;
 
     // Store technique as object (name fallback to ECO code)
-    setTechniques([...techniques, { ecoId: raw, name: raw }]);
-
+    setTechniques([
+      ...techniques,
+      {
+        ecoId: raw,
+        name: techDescription?.trim() || "—",
+      },
+    ]);
+    
     setShowCreateForm(false);
     setNewEcoCode("");
     setTechDescription("");
@@ -244,7 +250,7 @@ export default function Step3ExperimentalMethods() {
             <label className="block font-medium">ECO code</label>
             <input
               className="form-control"
-              placeholder="ECO:XXXXXXX"
+              placeholder="Example: ECO:1234567"
               value={newEcoCode}
               onChange={(e) => setNewEcoCode(e.target.value)}
             />
