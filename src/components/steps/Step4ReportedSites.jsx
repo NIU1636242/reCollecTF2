@@ -124,6 +124,8 @@ export default function Step4ReportedSites() {
 
   const hasSaved = sites.length > 0;
 
+  const [selectedBySite, setSelectedBySite] = useState({});
+
   // -----------------------------
   // RESTORE state when coming back
   // -----------------------------
@@ -140,6 +142,8 @@ export default function Step4ReportedSites() {
 
     const restoredSites = step4Data.sites || [];
     setActiveSite(step4Data.activeSite || restoredSites[0] || null);
+
+    setSelectedBySite(step4Data.selectedBySite || {});
   }, [step4Data]);
 
   useEffect(() => {
@@ -550,6 +554,7 @@ export default function Step4ReportedSites() {
       choice,
       showFuzzy,
       activeSite,
+      selectedBySite,
     });
 
     goToNextStep();
@@ -681,7 +686,17 @@ export default function Step4ReportedSites() {
                               className="mt-[3px]"
                               checked={choice[site] === `ex-${i}`}
                               onChange={() => {
+                                const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
+
                                 setChoice((p) => ({ ...p, [site]: `ex-${i}` }));
+                                setSelectedBySite((p) => ({
+                                  ...p,
+                                  [site]: {
+                                    kind: "exact",
+                                    hit,
+                                    nearbyGenes: nearby,
+                                  },
+                                }));
                                 setActiveSite(site);
                               }}
                             />
@@ -778,7 +793,17 @@ export default function Step4ReportedSites() {
                               className="mt-[3px]"
                               checked={choice[site] === `fz-${i}`}
                               onChange={() => {
+                                const nearby = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
+
                                 setChoice((p) => ({ ...p, [site]: `fz-${i}` }));
+                                setSelectedBySite((p) => ({
+                                  ...p,
+                                  [site]: {
+                                    kind: "fuzzy",
+                                    hit,
+                                    nearbyGenes: nearby,
+                                  },
+                                }));
                                 setActiveSite(site);
                               }}
                             />
@@ -830,6 +855,14 @@ export default function Step4ReportedSites() {
                         checked={choice[site] === "none-both"}
                         onChange={() => {
                           setChoice((p) => ({ ...p, [site]: "none-both" }));
+                          setSelectedBySite((p) => ({
+                            ...p,
+                            [site]: {
+                              kind: "none",
+                              hit: null,
+                              nearbyGenes: [],
+                            },
+                          }));
                           setActiveSite(site);
                         }}
                       />

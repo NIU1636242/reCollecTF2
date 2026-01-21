@@ -8,8 +8,8 @@ export default function Step6GeneRegulation() {
     step6Data,
     setStep6Data,
     goToNextStep,
-    genomes,       // must contain the genomes + genes loaded previously (same shape as Step 4 used)
-    strainData,    // from Step 2 (expressionInfo flag)
+    genomes, // por si necesitamos fallback (casos antiguos sin selectedBySite)
+    strainData, // from Step 2 (expressionInfo flag)
   } = useCuration();
 
   const expressionEnabled = !!strainData?.expressionInfo;
@@ -18,6 +18,9 @@ export default function Step6GeneRegulation() {
   const choice = step4Data?.choice || {};
   const exactHits = step4Data?.exactHits || {};
   const fuzzyHits = step4Data?.fuzzyHits || {};
+
+  // NUEVO: leído directamente de Step4 (si existe)
+  const selectedBySite = step4Data?.selectedBySite || {};
 
   const [regulation, setRegulation] = useState({});
   const [activeSite, setActiveSite] = useState(null);
@@ -46,92 +49,11 @@ export default function Step6GeneRegulation() {
   }
 
   // -----------------------------
-  // RECONSTRUCT FINAL HIT (chosen in Step 4)
+  // NUEVO: obtener el "paquete" elegido en Step4
+  // { kind: "hit" | "none", hit: {...} | null, nearbyGenes: [...] }
   // -----------------------------
-  function getSelectedHit(site) {
-    const sel = choice?.[site];
-    if (!sel) return null;
-
-    if (sel.startsWith("ex-")) {
-      const idx = parseInt(sel.split("-")[1], 10);
-      const hit = exactHits?.[site]?.[idx];
-      return hit && hit !== "none" ? hit : null;
-    }
-
-    if (sel.startsWith("fz-")) {
-      const idx = parseInt(sel.split("-")[1], 10);
-      const hit = fuzzyHits?.[site]?.[idx];
-      return hit && hit !== "none" ? hit : null;
-    }
-
-    return null;
-  }
-
-  // -----------------------------
-  // FIND NEARBY GENES (±150 nt chain logic)
-  // -----------------------------
-  function findGenesForHit(acc, hitStart1, hitEnd1) {
-    const genome = (genomes || []).find((g) => g.acc === acc);
-    if (!genome || !Array.isArray(genome.genes) || genome.genes.length === 0) return [];
-
-    const genes = genome.genes;
-    const hitStart = Number(hitStart1);
-    const hitEnd = Number(hitEnd1);
-
-    // 1) If the hit falls inside (or overlaps) a gene, anchor to that gene
-    let anchorIdx = genes.findIndex((g) => {
-      const gs = Number(g.start);
-      const ge = Number(g.end);
-      return hitStart <= ge && hitEnd >= gs; // overlap condition
-    });
-
-    // 2) Otherwise, anchor to the first gene on the RIGHT (start >= hitEnd), as before
-    if (anchorIdx === -1) {
-      anchorIdx = genes.findIndex((g) => Number(g.start) >= hitEnd);
-      if (anchorIdx === -1) anchorIdx = genes.length - 1;
-    }
-
-    const out = [];
-    const pushUnique = (g) => {
-      if (!g) return;
-      if (!out.some((x) => x.locus === g.locus)) {
-        out.push({
-          locus: g.locus || "",
-          geneLabel: g.geneLabel || g.gene || g.proteinId || "—",
-          product: g.product || "",
-          start: g.start,
-          end: g.end,
-          strand: g.strand || "+",
-        });
-      }
-    };
-
-    pushUnique(genes[anchorIdx]);
-
-    // extend left by gene-to-gene gaps
-    let i = anchorIdx - 1;
-    while (i >= 0) {
-      const current = genes[i];
-      const next = genes[i + 1];
-      const gap = Number(next.start) - Number(current.end);
-      if (gap > 150) break;
-      pushUnique(current);
-      i--;
-    }
-
-    // extend right by gene-to-gene gaps
-    i = anchorIdx + 1;
-    while (i < genes.length) {
-      const prev = genes[i - 1];
-      const current = genes[i];
-      const gap = Number(current.start) - Number(prev.end);
-      if (gap > 150) break;
-      pushUnique(current);
-      i++;
-    }
-
-    out.sort((a, b) => Number(a.start) - Number(b.start));
-    return out;
+  function getSelectedBundle(site) {
+  return selectedBySite?.[site] || { kind: "none", hit: null, nearbyGenes: [] };
   }
 
   // -----------------------------
@@ -162,7 +84,6 @@ export default function Step6GeneRegulation() {
   // CONFIRM
   // -----------------------------
   function handleConfirm() {
-    // Even if expression is disabled, we still persist (likely empty) and allow next step.
     setStep6Data(regulation);
     goToNextStep();
   }
@@ -178,9 +99,8 @@ export default function Step6GeneRegulation() {
   // -----------------------------
   return (
     <div className="space-y-6 text-sm">
-      <h2 className="text-2xl font-bold">
-        Step 6 – Gene Regulation
-      </h2>
+      <h2 className="text-2xl font-bold">Step 6 – Gene Regulation</h2>
+
       {!expressionEnabled && (
         <div className="bg-surface border border-border rounded p-4 text-sm text-muted">
           Expression data was not indicated in Step 2, so gene regulation cannot be curated for this manuscript.
@@ -195,8 +115,8 @@ export default function Step6GeneRegulation() {
           <div className="border border-border rounded overflow-hidden">
             {sites.map((s) => {
               const selected = activeSite === s;
-              const hit = getSelectedHit(s);
-              const hasHit = !!hit;
+              const bundle = getSelectedBundle(s);
+              const hasHit = bundle?.kind === "hit" && !!bundle?.hit;
 
               return (
                 <button
@@ -220,8 +140,9 @@ export default function Step6GeneRegulation() {
       )}
 
       {visibleSites.map((site) => {
-        const hit = getSelectedHit(site);
-        if (!hit) {
+        const bundle = getSelectedBundle(site);
+
+        if (!bundle || bundle.kind !== "hit" || !bundle.hit) {
           return (
             <div key={site} className="bg-surface border border-border rounded p-4 text-muted">
               No genomic mapping selected for <span className="font-mono">{site}</span> in Step 4.
@@ -229,7 +150,8 @@ export default function Step6GeneRegulation() {
           );
         }
 
-        const genes = findGenesForHit(hit.acc, hit.start + 1, hit.end + 1);
+        const hit = bundle.hit;
+        const genes = Array.isArray(bundle.nearbyGenes) ? bundle.nearbyGenes : [];
 
         return (
           <div key={site} className="bg-surface border border-border rounded p-4 space-y-3">
@@ -268,9 +190,7 @@ export default function Step6GeneRegulation() {
                           {g.geneLabel && g.geneLabel !== "—" ? ` (${g.geneLabel})` : ""}
                         </div>
 
-                        <div className="text-xs text-muted">
-                          {g.product || "—"}
-                        </div>
+                        <div className="text-xs text-muted">{g.product || "—"}</div>
 
                         <div className="text-xs text-muted mt-1">
                           start: {g.start} &nbsp; end: {g.end}
