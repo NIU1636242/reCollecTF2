@@ -520,8 +520,17 @@ WHERE ${geneIdExpr} IS NOT NULL;
 
       setMsg("✅ Submit OK: se han insertado/actualizado publication, TF, curation, sites, techniques y regulations.");
     } catch (e) {
-      console.error(e);
-      setMsg(`❌ Error: ${e?.message || String(e)}`);
+      console.error("Submit error full:", e);
+      console.error("Submit error payload:", e?.payload);
+
+      const details =
+        typeof e?.payload === "string"
+          ? e.payload
+          : e?.payload
+            ? JSON.stringify(e.payload, null, 2)
+            : "";
+
+      setMsg(`Error: ${e?.message || String(e)}\n\n${details}`);
     } finally {
       setLoading(false);
     }
