@@ -555,6 +555,8 @@ export default function Step4ReportedSites() {
   function handleConfirm() {
     if (!allCompleted) return;
 
+    const genesByAcc = Object.fromEntries((genomes || []).map(g => [g.acc, g.genes || []]));
+
     setStep4Data({
       siteType,
       rawSites,
@@ -565,6 +567,7 @@ export default function Step4ReportedSites() {
       showFuzzy,
       activeSite,
       selectedBySite,
+      genesByAcc,
     });
 
     goToNextStep();
@@ -655,7 +658,7 @@ export default function Step4ReportedSites() {
           </div>
 
           {!allCompleted && (
-            <div className="mt-3 p-3 rounded border border-border bg-muted text-sm font-semibold">
+            <div className="mt-3 text-sm font-semibold text-amber-400">
               ⚠️ Select one valid mapping (exact or mismatch) for every site before continuing.
             </div>
           )}
