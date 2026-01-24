@@ -9,15 +9,50 @@ import { dispatchWorkflow } from "../../utils/serverless";
 function esc(str) {
   return String(str ?? "").replace(/'/g, "''");
 }
+
 function truthyBool(v) {
   return v ? 1 : 0;
 }
-function toStrandInt(s) {
-  return String(s) === "-" ? -1 : 1;
+
+function pickFirstNonEmpty(...vals) {
+  for (const v of vals) {
+    if (v === 0) return 0;
+    if (v === false) return false;
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return "";
 }
-function safeText(v, fallback = "") {
-  const s = String(v ?? "").trim();
-  return s.length ? s : fallback;
+
+function normalizeStrand(str) {
+  if (str === "-" || str === -1) return -1;
+  return 1;
+}
+
+function doiToUrl(doiRaw) {
+  const doi = String(doiRaw || "").trim();
+  if (!doi) return "";
+  if (doi.toLowerCase().startsWith("http")) return doi;
+  return `https://doi.org/${doi}`;
+}
+
+// Get first accession/description from lists shaped like [{accession,description}, ...]
+function firstAcc(list) {
+  const x = Array.isArray(list) ? list[0] : null;
+  if (!x) return "";
+  if (typeof x === "string") return x.trim();
+  return String(x.accession || "").trim();
+}
+function firstDesc(list) {
+  const x = Array.isArray(list) ? list[0] : null;
+  if (!x) return "";
+  if (typeof x === "string") return "";
+  return String(x.description || "").trim();
+}
+
+function getStep5ForSite(step5Data, site) {
+  return step5Data?.annotations?.[site] || null;
 }
 
 // --------------------
@@ -28,11 +63,14 @@ export default function Step7CurationInfo() {
     publication,
     tf,
     genomeList,
+    uniprotList,
+    refseqList,
     strainData,
     techniques,
     step4Data,
     step5Data,
     step6Data,
+    setStep7Data,
   } = useCuration();
 
   const REVISION_REASONS = useMemo(
@@ -55,358 +93,439 @@ export default function Step7CurationInfo() {
   const [msg, setMsg] = useState("");
 
   const canSubmit = useMemo(() => {
-    return !!tf?.name && !!publication?.title && !loading;
-  }, [tf, publication, loading]);
+    return !!publication && !!tf?.name && !!step4Data && !loading;
+  }, [publication, tf, step4Data, loading]);
 
-  function buildSql() {
-    // --------------------
-    // Collect inputs
-    // --------------------
-    const tfName = safeText(tf?.name, "");
-    if (!tfName) throw new Error("Missing TF name (Step 2).");
+  // --------------------
+  // BUILD SQL (full insert)
+  // --------------------
+  function buildFullSql() {
+    if (!publication) throw new Error("Missing publication (Step 1).");
+    if (!tf?.name) throw new Error("Missing TF name (Step 2).");
+    if (!step4Data?.sites?.length) throw new Error("Missing sites (Step 4).");
 
-    const pubTitle = safeText(publication?.title, "");
-    const pubAuthors = safeText(publication?.authors, "—");
-    const pubJournal = safeText(publication?.journal, "—");
-    const pubDate = safeText(publication?.pubdate, "—");
-    const pubPmid = publication?.pmid ? Number(publication.pmid) : null;
+    const pub = publication;
 
-    const requiresRevision = revisionReason !== "None";
+    const pubTitle = pickFirstNonEmpty(pub?.title, "");
+    const pubAuthors = pickFirstNonEmpty(pub?.authors, "");
+    const pubJournal = pickFirstNonEmpty(pub?.journal, "");
+    const pubDate = pickFirstNonEmpty(pub?.pubdate, pub?.publication_date, "");
+    const pmid = pickFirstNonEmpty(pub?.pmid, "");
+    const doi = pickFirstNonEmpty(pub?.doi, "");
+    const url = pickFirstNonEmpty(doiToUrl(doi), pub?.url, "");
 
-    // Strain flags from Step2
-    const containsPromoter = truthyBool(!!strainData?.promoterInfo);
-    const containsExpression = truthyBool(!!strainData?.expressionInfo);
+    // Publication key: prefer PMID, else URL (doi-url), else title+journal+date
+    const pubKeyWhere = pmid
+      ? `pmid='${esc(pmid)}'`
+      : url
+        ? `url='${esc(url)}'`
+        : `title='${esc(pubTitle)}' AND journal='${esc(pubJournal)}' AND publication_date='${esc(pubDate)}'`;
 
-    // Organisms (use what you already capture in Step2)
-    const siteSpecies = safeText(strainData?.organismTFBindingSites, "Unknown");
-    const tfSpecies = safeText(strainData?.organismReportedTF, "Unknown");
+    const tfName = String(tf.name).trim();
 
-    // Techniques list (Step3) -> map by ECO id (EO_term in DB)
-    const techArr = Array.isArray(techniques) ? techniques : [];
-    const techNormalized = techArr
-      .map((t) => {
-        const eco =
-          (typeof t === "string" && t) ||
-          t?.ecoId ||
-          t?.eco ||
-          t?.EO_term ||
-          t?.id ||
-          t?.code ||
-          t?.identifier ||
-          "";
-        if (!eco) return null;
-        return {
-          eco: String(eco),
-          name: String(t?.name || t?.label || eco),
-        };
-      })
-      .filter(Boolean);
-
-    // Step4 selections
-    const selectedBySite = step4Data?.selectedBySite || {};
-    const sites = step4Data?.sites || [];
-
-    // Step5 annotations (tf type/function + techniques per site)
-    const annotations = step5Data?.annotations || {};
-
-    // Step6 regulation (genes selected by curator)
-    const regulation = step6Data || {}; // { [site]: { regulatedGenes: [...] } }
-
-    // --------------------
-    // TF Family / TF / TF Instance
-    // --------------------
-    const rawFamilyId =
-      tf?.family_id ??
-      tf?.familyId ??
-      tf?.familyID ??
-      tf?.family;
-
+    // Family info
+    const rawFamilyId = tf?.family_id ?? tf?.familyId ?? tf?.familyID ?? null;
     const familyIdNum = Number(rawFamilyId);
     const hasFamilyId = Number.isFinite(familyIdNum) && familyIdNum > 0;
 
-    const familyName = safeText(tf?.family_name, "") || `AutoFamily:${tfName}`;
-    const familyDesc = [requiresRevision ? `Revision reason: ${revisionReason}` : "", notes]
+    const familyName = pickFirstNonEmpty(tf?.familyName, tf?.family_name, tf?.family, `AutoFamily:${tfName}`);
+    const familyDesc = pickFirstNonEmpty(tf?.family_description, tf?.newFamilyDesc, "", ""); // NOT NULL -> '' OK
+
+    const tfDesc = pickFirstNonEmpty(tf?.description, "", ""); // NOT NULL in core_tf
+
+    // Uniprot/refseq (your context stores arrays of objects)
+    const uniAcc = pickFirstNonEmpty(firstAcc(uniprotList), tf?.uniprot_accession, tf?.uniprot, "");
+    const refAcc = pickFirstNonEmpty(firstAcc(refseqList), tf?.refseq_accession, tf?.refseq, "");
+    const tfInstanceDesc = pickFirstNonEmpty(firstDesc(uniprotList), firstDesc(refseqList), tfDesc, tfName, "—");
+    const tfInstanceNotes = ""; // NOT NULL
+
+    // If your schema requires tfinstance and you want to enforce it:
+    if (!uniAcc) throw new Error("Missing UniProt accession (Step 2).");
+    if (!refAcc) throw new Error("Missing RefSeq accession (Step 2).");
+
+    // Step2 organism strings
+    const siteSpecies = pickFirstNonEmpty(
+      strainData?.organismTFBindingSites,
+      (genomeList?.[0] && (genomeList[0].organism || genomeList[0].description)) || "",
+      ""
+    );
+
+    const tfSpecies = pickFirstNonEmpty(strainData?.organismReportedTF, siteSpecies, "");
+    const containsPromoter = truthyBool(strainData?.promoterInfo);
+    const containsExpression = truthyBool(strainData?.expressionInfo);
+
+    const requiresRevision = revisionReason !== "None";
+    const submissionNotes = [requiresRevision ? `Revision reason: ${revisionReason}` : "", notes]
       .filter(Boolean)
       .join("\n");
 
-    // These tables have NOT NULL description/notes, so never send NULL
-    const tfDesc = safeText(tf?.description, "") || safeText(notes, "");
-    const tfiDesc = safeText(notes, "");
-    const tfiNotes = safeText(notes, "");
+    // Step4
+    const selectedBySite = step4Data?.selectedBySite || {};
+    const siteType = pickFirstNonEmpty(step4Data?.siteType, "");
 
-    // If you have these in Step2 context in the future, plug them here.
-    const uniprotId = safeText(tf?.uniprot_id || tf?.uniprotId || tf?.uniprot, "UNKNOWN");
-    const refseqId = safeText(tf?.refseq_id || tf?.refseqId || tf?.refseq, "UNKNOWN");
-
-    // --------------------
-    // Genomes used (from genomeList Step2)
-    // core_genome columns: genome_id (PK), genome_accession, genome_dna_accession, genome_taxon_id, organism
-    // We'll store genome_id as accession (works as string PK).
-    // --------------------
-    const genomesToInsert = (Array.isArray(genomeList) ? genomeList : [])
-      .map((g) => String(g?.accession || "").trim())
-      .filter(Boolean);
-
-    // --------------------
-    // Sites that have mapping (kind exact/fuzzy)
-    // Insert core_siteinstance + core_curation_siteinstance
-    // --------------------
-    const mappedSites = [];
-    for (const site of sites) {
-      const bundle = selectedBySite?.[site];
-      if (!bundle || !bundle.hit || (bundle.kind !== "exact" && bundle.kind !== "fuzzy")) continue;
-      mappedSites.push({ site, bundle });
-    }
-
-    // --------------------
-    // Build SQL
-    // --------------------
     const sql = [];
     sql.push("PRAGMA foreign_keys = ON;");
     sql.push("BEGIN TRANSACTION;");
 
-    // 0) Ensure a curator exists (we use a stable username)
+    // --------------------
+    // 1) Publication upsert (MATCH SCHEMA)
+    // core_publication has: pmid, authors, title, journal, publication_date, url, ...
+    // NO doi, NO pub_date
+    // --------------------
     sql.push(`
-INSERT OR IGNORE INTO core_curator (curator_type, username, email)
-VALUES ('human', 'webcurator', 'webcurator@example.com');
-    `.trim());
-
-    sql.push(`
-WITH curator_row AS (
-  SELECT curator_id FROM core_curator WHERE username='webcurator' LIMIT 1
-)
-SELECT curator_id FROM curator_row;
-    `.trim());
-
-    // 1) Publication (NO DOI column!)
-    // core_publication: pmid, title, authors, journal, publication_date, curation_complete,
-    // requires_revision, contains_promoter_data, contains_expression_data, revision_reason, notes
-    const pmidExpr = pubPmid !== null && Number.isFinite(pubPmid) ? String(pubPmid) : "NULL";
-
-    sql.push(`
-INSERT OR IGNORE INTO core_publication
-(pmid, title, authors, journal, publication_date,
- curation_complete, requires_revision, contains_promoter_data, contains_expression_data,
- revision_reason, notes)
-VALUES
-(${pmidExpr},
- '${esc(pubTitle)}',
- '${esc(pubAuthors)}',
- '${esc(pubJournal)}',
- '${esc(pubDate)}',
- ${truthyBool(curationComplete)},
- ${truthyBool(requiresRevision)},
- ${containsPromoter},
- ${containsExpression},
- ${requiresRevision ? `'${esc(revisionReason)}'` : "NULL"},
- ${notes.trim() ? `'${esc(notes)}'` : "NULL"}
+INSERT INTO core_publication
+  (publication_type, pmid, authors, title, journal, publication_date, url,
+   contains_promoter_data, contains_expression_data, submission_notes, curation_complete,
+   reported_TF, reported_species)
+SELECT
+  'ARTICLE',
+  ${pmid ? `'${esc(pmid)}'` : "NULL"},
+  '${esc(pubAuthors)}',
+  '${esc(pubTitle)}',
+  '${esc(pubJournal)}',
+  '${esc(pubDate)}',
+  ${url ? `'${esc(url)}'` : "NULL"},
+  ${containsPromoter},
+  ${containsExpression},
+  ${submissionNotes ? `'${esc(submissionNotes)}'` : "NULL"},
+  ${truthyBool(curationComplete)},
+  '${esc(tfName)}',
+  '${esc(siteSpecies)}'
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_publication WHERE ${pubKeyWhere}
 );
     `.trim());
 
-    // Get publication_id reliably:
-    // If PMID exists, use it; else fallback to title+journal+date.
+    // Update safe fields if exists
     sql.push(`
-SELECT publication_id FROM core_publication
-WHERE
-  (${pmidExpr} IS NOT NULL AND pmid = ${pmidExpr})
-  OR
-  (${pmidExpr} IS NULL AND title='${esc(pubTitle)}' AND journal='${esc(pubJournal)}' AND publication_date='${esc(pubDate)}')
-ORDER BY publication_id DESC
-LIMIT 1;
+UPDATE core_publication
+SET
+  authors = CASE WHEN authors IS NULL OR authors='' THEN '${esc(pubAuthors)}' ELSE authors END,
+  title = CASE WHEN title IS NULL OR title='' THEN '${esc(pubTitle)}' ELSE title END,
+  journal = CASE WHEN journal IS NULL OR journal='' THEN '${esc(pubJournal)}' ELSE journal END,
+  publication_date = CASE WHEN publication_date IS NULL OR publication_date='' THEN '${esc(pubDate)}' ELSE publication_date END,
+  url = CASE WHEN url IS NULL OR url='' THEN ${url ? `'${esc(url)}'` : "url"} ELSE url END,
+  reported_TF = CASE WHEN reported_TF IS NULL OR reported_TF='' THEN '${esc(tfName)}' ELSE reported_TF END,
+  reported_species = CASE WHEN reported_species IS NULL OR reported_species='' THEN '${esc(siteSpecies)}' ELSE reported_species END,
+  contains_promoter_data = ${containsPromoter},
+  contains_expression_data = ${containsExpression},
+  curation_complete = ${truthyBool(curationComplete)},
+  submission_notes = CASE
+    WHEN submission_notes IS NULL OR submission_notes='' THEN ${submissionNotes ? `'${esc(submissionNotes)}'` : "submission_notes"}
+    ELSE submission_notes
+  END
+WHERE ${pubKeyWhere};
     `.trim());
 
-    // 2) TF family
+    const publicationIdExpr = `(SELECT publication_id FROM core_publication WHERE ${pubKeyWhere} LIMIT 1)`;
+
+    // --------------------
+    // 2) TF Family + TF (MATCH SCHEMA: NOT NULL family_id, description)
+    // --------------------
     if (!hasFamilyId) {
       sql.push(`
-INSERT OR IGNORE INTO core_tffamily (name, description)
-VALUES ('${esc(familyName)}', '${esc(familyDesc)}');
+INSERT INTO core_tffamily (name, description)
+SELECT '${esc(familyName)}', '${esc(familyDesc)}'
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_tffamily WHERE lower(name)=lower('${esc(familyName)}')
+);
       `.trim());
     }
 
     const familyIdExpr = hasFamilyId
       ? `${familyIdNum}`
-      : `(SELECT tf_family_id FROM core_tffamily WHERE name='${esc(familyName)}' ORDER BY tf_family_id DESC LIMIT 1)`;
+      : `(SELECT tf_family_id FROM core_tffamily WHERE lower(name)=lower('${esc(familyName)}') LIMIT 1)`;
 
-    // 3) TF (description NOT NULL)
     sql.push(`
-INSERT OR IGNORE INTO core_tf (name, family_id, description)
-VALUES ('${esc(tfName)}', ${familyIdExpr}, '${esc(tfDesc)}');
+INSERT INTO core_tf (name, family_id, description)
+SELECT '${esc(tfName)}', ${familyIdExpr}, '${esc(tfDesc)}'
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_tf WHERE lower(name)=lower('${esc(tfName)}')
+);
+    `.trim());
 
+    sql.push(`
 UPDATE core_tf
 SET
   family_id = COALESCE(family_id, ${familyIdExpr}),
-  description = CASE
-    WHEN description IS NULL OR description='' THEN '${esc(tfDesc)}'
-    ELSE description
-  END
+  description = CASE WHEN description IS NULL THEN '${esc(tfDesc)}' ELSE description END
 WHERE lower(name)=lower('${esc(tfName)}');
     `.trim());
 
-    // 4) TF instance (description + notes NOT NULL, uniprot_id/refseq_id NOT NULL)
-    // tf_instance_id AUTOINC, so we insert and later select.
+    const tfIdExpr = `(SELECT TF_id FROM core_tf WHERE lower(name)=lower('${esc(tfName)}') LIMIT 1)`;
+
+    // --------------------
+    // 3) TF Instance (core_tfinstance) (MATCH SCHEMA: description NOT NULL, notes NOT NULL, refseq/uniprot NOT NULL)
+    // --------------------
     sql.push(`
-INSERT OR IGNORE INTO core_tfinstance (tf_id, uniprot_id, refseq_id, description, notes)
-VALUES (
-  (SELECT tf_id FROM core_tf WHERE lower(name)=lower('${esc(tfName)}') LIMIT 1),
-  '${esc(uniprotId)}',
-  '${esc(refseqId)}',
-  '${esc(tfiDesc)}',
-  '${esc(tfiNotes)}'
+INSERT INTO core_tfinstance (refseq_accession, uniprot_accession, description, TF_id, notes)
+SELECT
+  '${esc(refAcc)}',
+  '${esc(uniAcc)}',
+  '${esc(tfInstanceDesc)}',
+  ${tfIdExpr},
+  '${esc(tfInstanceNotes)}'
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_tfinstance WHERE uniprot_accession='${esc(uniAcc)}'
 );
     `.trim());
 
-    // 5) Curation (experimental_process NOT NULL, forms_complex NOT NULL, complex_notes NOT NULL)
-    // We create it even if no sites map.
+    sql.push(`
+UPDATE core_tfinstance
+SET
+  TF_id = COALESCE(TF_id, ${tfIdExpr}),
+  refseq_accession = COALESCE(NULLIF(refseq_accession,''), '${esc(refAcc)}'),
+  description = COALESCE(NULLIF(description,''), '${esc(tfInstanceDesc)}'),
+  notes = COALESCE(notes, '')
+WHERE uniprot_accession='${esc(uniAcc)}';
+    `.trim());
+
+    const tfInstanceIdExpr = `(SELECT TF_instance_id FROM core_tfinstance WHERE uniprot_accession='${esc(uniAcc)}' LIMIT 1)`;
+
+    // --------------------
+    // 4) Curation row (core_curation) (MATCH SCHEMA: notes NOT NULL, last_modified NOT NULL)
+    // --------------------
+    const curatorIdExpr = `(SELECT curator_id FROM core_curator ORDER BY curator_id LIMIT 1)`;
+
+    // notes in core_curation is NOT NULL
+    const curationNotes = pickFirstNonEmpty(submissionNotes, "");
+
     sql.push(`
 INSERT INTO core_curation
-(TF_species, site_species, experimental_process, forms_complex, complex_notes, notes, publication_id, curator_id)
+  (TF_species, site_species, experimental_process, forms_complex,
+   complex_notes, notes, last_modified, curator_id, publication_id, created, validated_by_id)
 VALUES
-('${esc(tfSpecies)}',
- '${esc(siteSpecies)}',
- 'manual',
- 0,
- '',
- ${notes.trim() ? `'${esc(notes)}'` : "NULL"},
- (
-   SELECT publication_id FROM core_publication
-   WHERE
-     (${pmidExpr} IS NOT NULL AND pmid = ${pmidExpr})
-     OR
-     (${pmidExpr} IS NULL AND title='${esc(pubTitle)}' AND journal='${esc(pubJournal)}' AND publication_date='${esc(pubDate)}')
-   ORDER BY publication_id DESC
-   LIMIT 1
- ),
- (SELECT curator_id FROM core_curator WHERE username='webcurator' LIMIT 1)
+  ('${esc(tfSpecies)}', '${esc(siteSpecies)}', NULL,
+   0, NULL, '${esc(curationNotes)}',
+   datetime('now'), ${curatorIdExpr}, ${publicationIdExpr}, datetime('now'), NULL);
+    `.trim());
+
+    const curationIdExpr = `(SELECT curation_id FROM core_curation WHERE publication_id=${publicationIdExpr} ORDER BY curation_id DESC LIMIT 1)`;
+
+    // Optional table in your real DB (seen in logs): core_curation_confidence
+    sql.push(`
+INSERT INTO core_curation_confidence (curation_id, confidence)
+SELECT ${curationIdExpr}, 0
+WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_curation_confidence')
+  AND NOT EXISTS (SELECT 1 FROM core_curation_confidence WHERE curation_id=${curationIdExpr});
+    `.trim());
+
+    // Link TF instance to curation
+    sql.push(`
+INSERT INTO core_curation_TF_instances (curation_id, tfinstance_id)
+SELECT ${curationIdExpr}, ${tfInstanceIdExpr}
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_curation_TF_instances
+  WHERE curation_id=${curationIdExpr} AND tfinstance_id=${tfInstanceIdExpr}
 );
     `.trim());
 
-    // curation_id for later use
-    sql.push(`
-SELECT curation_id FROM core_curation
-ORDER BY curation_id DESC
-LIMIT 1;
-    `.trim());
+    // --------------------
+    // 5) Genomes + Genes (MATCH SCHEMA: core_genome.organism, genome_accession)
+    // --------------------
+    const accessions = (genomeList || []).map((g) => g.accession).filter(Boolean);
 
-    // 6) Genomes (insert minimal rows)
-    for (const acc of genomesToInsert) {
+    for (const acc of accessions) {
       sql.push(`
-INSERT OR IGNORE INTO core_genome (genome_id, genome_accession, genome_dna_accession, genome_taxon_id, organism)
-VALUES ('${esc(acc)}', '${esc(acc)}', '${esc(acc)}', '', '${esc(siteSpecies)}');
+INSERT INTO core_genome (genome_accession, organism)
+SELECT '${esc(acc)}', '${esc(siteSpecies)}'
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_genome WHERE genome_accession='${esc(acc)}'
+);
       `.trim());
     }
 
-    // 7) Experimental techniques master rows (ensure EO_term exists)
-    for (const t of techNormalized) {
+    // Insert genes (optional: only if Step4 stored them)
+    const genesByAcc = step4Data?.genesByAcc || null;
+    if (genesByAcc) {
+      for (const [acc, genes] of Object.entries(genesByAcc)) {
+        if (!Array.isArray(genes) || genes.length === 0) continue;
+
+        const genomeIdExpr = `(SELECT genome_id FROM core_genome WHERE genome_accession='${esc(acc)}' LIMIT 1)`;
+
+        for (const g of genes) {
+          const locus = pickFirstNonEmpty(g?.locus, "");
+          if (!locus) continue;
+
+          const geneName = pickFirstNonEmpty(g?.geneLabel, g?.gene, "—"); // name NOT NULL
+          const desc = pickFirstNonEmpty(g?.product, "—"); // description NOT NULL
+          const start = Number(g?.start ?? 0);
+          const end = Number(g?.end ?? 0);
+          const strand = normalizeStrand(g?.strand);
+
+          sql.push(`
+INSERT INTO core_gene (genome_id, name, description, start, end, strand, locus_tag, gene_type)
+SELECT
+  ${genomeIdExpr},
+  '${esc(geneName)}',
+  '${esc(desc)}',
+  ${Number.isFinite(start) ? start : 0},
+  ${Number.isFinite(end) ? end : 0},
+  ${strand},
+  '${esc(locus)}',
+  'CDS'
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_gene
+  WHERE genome_id=${genomeIdExpr} AND locus_tag='${esc(locus)}'
+);
+          `.trim());
+        }
+      }
+    }
+
+    // --------------------
+    // 6) Techniques (MATCH SCHEMA: name/description NOT NULL)
+    // --------------------
+    const techList = Array.isArray(techniques) ? techniques : [];
+
+    for (const t of techList) {
+      const EO = pickFirstNonEmpty(t?.ecoId, t?.eco, t?.EO_term, t?.id, t?.code, "");
+      if (!EO) continue;
+
+      const preset = pickFirstNonEmpty(t?.presetFunction, t?.preset_function, "");
+      const name = pickFirstNonEmpty(t?.name, EO);            // NOT NULL
+      const desc = pickFirstNonEmpty(t?.description, t?.name, "—"); // NOT NULL
+
       sql.push(`
-INSERT OR IGNORE INTO core_experimentaltechnique (name, category, EO_term, description)
-VALUES ('${esc(t.name)}', 'binding', '${esc(t.eco)}', '');
+INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
+SELECT '${esc(name)}', '${esc(desc)}', ${preset ? `'${esc(preset)}'` : "NULL"}, '${esc(EO)}'
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_experimentaltechnique WHERE EO_term='${esc(EO)}'
+);
       `.trim());
     }
 
-    // 8) Siteinstances + curation_siteinstance + techniques linking + genes + regulation
-    // NOTE:
-    // - core_siteinstance: (_seq, start, end, strand, genome_id)
-    // - core_curation_siteinstance: (TF_type, TF_function, qval, creation_date, last_update, is_high_throughput, is_sig, significance_notes, site_instance_id, curation_id)
-    // - join techniques: core_curation_siteinstance_experimental_techniques (curation_siteinstance_id, experimentaltechnique_id)
-    // - genes: core_gene (locus_tag, genome_id, name, description, start, end, strand)
-    // - regulation: core_regulation (curation_site_instance_id, gene_id, evidence_type)
-    //
-    for (const { site, bundle } of mappedSites) {
+    // --------------------
+    // 7) Sites + mappings (MATCH SCHEMA)
+    // core_siteinstance: _seq, genome_id, start, end, strand, PK site_id
+    // core_curation_siteinstance: annotated_seq NOT NULL, TF_type NOT NULL, TF_function NOT NULL, NO TF_instance_id
+    // --------------------
+    const sites = step4Data.sites || [];
+
+    for (const site of sites) {
+      const bundle = selectedBySite?.[site] || { kind: "none", hit: null, nearbyGenes: [] };
+      const s5 = getStep5ForSite(step5Data, site);
+
+      const TF_type = pickFirstNonEmpty(s5?.tfType, "not specified");       // NOT NULL in core_curation_siteinstance
+      const TF_function = pickFirstNonEmpty(s5?.tfFunc, "not specified");   // NOT NULL
+      const annotatedSeq = pickFirstNonEmpty(s5?.annotated_seq, s5?.annotatedSeq, site); // NOT NULL
+      const qv = s5?.quantitative_value ?? s5?.qval ?? s5?.qValue ?? null;
+      const qvNum = Number(qv);
+      const quantitativeValue = Number.isFinite(qvNum) ? qvNum : null;
+
+      // If no mapping chosen: goes to core_notannotatedsiteinstance (allowed TF fields nullable there)
+      if (!bundle || bundle.kind === "none" || !bundle.hit) {
+        sql.push(`
+INSERT INTO core_notannotatedsiteinstance (sequence, curation_id, TF_type, TF_function)
+VALUES ('${esc(site)}', ${curationIdExpr},
+        ${TF_type ? `'${esc(TF_type)}'` : "NULL"},
+        ${TF_function ? `'${esc(TF_function)}'` : "NULL"});
+        `.trim());
+
+        // Optional: if you want techniques linked even for notannotated, you can add it here later.
+        continue;
+      }
+
       const hit = bundle.hit;
+      const acc = hit.acc;
+      const hitStart0 = Number(hit.start ?? 0);
+      const hitEnd0 = Number(hit.end ?? 0);
+      const strand = normalizeStrand(hit.strand);
 
-      const acc = String(hit.acc || "").trim();
-      if (!acc) continue;
+      const genomeIdExpr = `(SELECT genome_id FROM core_genome WHERE genome_accession='${esc(acc)}' LIMIT 1)`;
 
-      const seq = safeText(hit.match || hit.site || site, "");
-      const start0 = Number(hit.start);
-      const end0 = Number(hit.end);
-      const strand = toStrandInt(hit.strand);
-
-      // per-site annotation
-      const ann = annotations?.[site] || {};
-      const tfType = safeText(ann.tfType, "not specified");
-      const tfFunc = safeText(ann.tfFunc, "not specified");
-      const techMap = ann.techniques || {};
-
-      // Insert site instance (ignore duplicates)
+      // Insert siteinstance (avoid duplicates)
       sql.push(`
-INSERT OR IGNORE INTO core_siteinstance (_seq, start, end, strand, genome_id)
-VALUES ('${esc(seq)}', ${start0}, ${end0}, ${strand}, '${esc(acc)}');
+INSERT INTO core_siteinstance (_seq, genome_id, start, end, strand)
+SELECT
+  '${esc(site)}',
+  ${genomeIdExpr},
+  ${hitStart0},
+  ${hitEnd0},
+  ${strand}
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_siteinstance
+  WHERE genome_id=${genomeIdExpr}
+    AND start=${hitStart0} AND end=${hitEnd0} AND strand=${strand}
+    AND _seq='${esc(site)}'
+);
       `.trim());
 
-      // Insert curation_siteinstance (this is the row that gets technique links + regulation)
+      const siteInstanceIdExpr = `(SELECT site_id FROM core_siteinstance
+        WHERE genome_id=${genomeIdExpr}
+          AND start=${hitStart0} AND end=${hitEnd0} AND strand=${strand}
+          AND _seq='${esc(site)}'
+        ORDER BY site_id DESC LIMIT 1)`;
+
+      // Insert curation_siteinstance (NO TF_instance_id column in schema)
       sql.push(`
 INSERT INTO core_curation_siteinstance
-(TF_type, TF_function, qval, creation_date, last_update, is_high_throughput, is_sig, significance_notes, site_instance_id, curation_id)
+  (curation_id, site_instance_id, annotated_seq, quantitative_value, site_type, TF_function, TF_type)
 VALUES
-('${esc(tfType)}',
- '${esc(tfFunc)}',
- NULL,
- datetime('now'),
- datetime('now'),
- 0,
- 0,
- '',
- (SELECT site_instance_id FROM core_siteinstance
-  WHERE genome_id='${esc(acc)}' AND start=${start0} AND end=${end0} AND strand=${strand} AND _seq='${esc(seq)}'
-  ORDER BY site_instance_id DESC
-  LIMIT 1
- ),
- (SELECT curation_id FROM core_curation ORDER BY curation_id DESC LIMIT 1)
-);
+  (${curationIdExpr},
+   ${siteInstanceIdExpr},
+   '${esc(annotatedSeq)}',
+   ${quantitativeValue === null ? "NULL" : quantitativeValue},
+   ${siteType ? `'${esc(siteType)}'` : "NULL"},
+   '${esc(TF_function)}',
+   '${esc(TF_type)}');
       `.trim());
 
-      // Techniques links (only checked ones)
-      for (const ecoId of Object.keys(techMap || {})) {
-        if (!techMap[ecoId]) continue;
+      const curationSiteInstanceIdExpr = `(SELECT id FROM core_curation_siteinstance
+        WHERE curation_id=${curationIdExpr}
+          AND site_instance_id=${siteInstanceIdExpr}
+        ORDER BY id DESC LIMIT 1)`;
+
+      // Link ONLY techniques checked in Step5 for this site
+      // NOTE: table uses curation_siteinstance_id (without extra underscore)
+      const techMap = s5?.techniques || {};
+      const selectedECOs = Object.keys(techMap).filter((eco) => techMap[eco] === true);
+
+      for (const eco of selectedECOs) {
+        const techIdExpr = `(SELECT technique_id
+          FROM core_experimentaltechnique
+          WHERE EO_term='${esc(eco)}'
+          LIMIT 1)`;
 
         sql.push(`
-INSERT OR IGNORE INTO core_curation_siteinstance_experimental_techniques
-(curation_siteinstance_id, experimentaltechnique_id)
-VALUES
-(
- (SELECT curation_site_instance_id FROM core_curation_siteinstance ORDER BY curation_site_instance_id DESC LIMIT 1),
- (SELECT experimental_technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(ecoId)}' LIMIT 1)
-);
+INSERT INTO core_curation_siteinstance_experimental_techniques
+  (curation_siteinstance_id, experimentaltechnique_id)
+SELECT ${curationSiteInstanceIdExpr}, ${techIdExpr}
+WHERE ${techIdExpr} IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM core_curation_siteinstance_experimental_techniques
+    WHERE curation_siteinstance_id=${curationSiteInstanceIdExpr}
+      AND experimentaltechnique_id=${techIdExpr}
+  );
         `.trim());
       }
 
-      // Genes: we insert ALL nearbyGenes so that regulations can reference them safely
-      const nearbyGenes = Array.isArray(bundle.nearbyGenes) ? bundle.nearbyGenes : [];
-      for (const g of nearbyGenes) {
-        const locus = safeText(g?.locus, "");
-        if (!locus) continue;
+      // --------------------
+      // Regulations from Step6 (MATCH SCHEMA core_regulation)
+      // core_regulation: (curation_site_instance_id, gene_id, evidence_type, meta_site_id)
+      // --------------------
+      const regsForSite = step6Data?.[site]?.regulatedGenes || [];
+      if (Array.isArray(regsForSite) && regsForSite.length > 0) {
+        for (const g of regsForSite) {
+          const locus = pickFirstNonEmpty(g?.locus, "");
+          if (!locus) continue;
 
-        const gName = safeText(g?.geneLabel, "");
-        const gDesc = safeText(g?.product, "");
-        const gStart = Number(g?.start);
-        const gEnd = Number(g?.end);
-        const gStrand = toStrandInt(g?.strand);
+          const geneIdExpr = `(SELECT gene_id FROM core_gene
+            WHERE locus_tag='${esc(locus)}' AND genome_id=${genomeIdExpr}
+            ORDER BY gene_id DESC LIMIT 1)`;
 
-        sql.push(`
-INSERT OR IGNORE INTO core_gene
-(locus_tag, genome_id, name, description, start, end, strand)
-VALUES
-('${esc(locus)}', '${esc(acc)}', '${esc(gName)}', '${esc(gDesc)}', ${gStart}, ${gEnd}, ${gStrand});
-        `.trim());
-      }
+          const evidenceType = containsExpression ? "exp_verified" : "inferred";
 
-      // Regulation: insert only genes selected in Step6
-      const regulated = regulation?.[site]?.regulatedGenes || [];
-      for (const g of regulated) {
-        const locus = safeText(g?.locus, "");
-        if (!locus) continue;
-
-        sql.push(`
-INSERT OR IGNORE INTO core_regulation
-(curation_site_instance_id, gene_id, evidence_type)
-VALUES
-(
-  (SELECT curation_site_instance_id FROM core_curation_siteinstance ORDER BY curation_site_instance_id DESC LIMIT 1),
-  (SELECT gene_id FROM core_gene WHERE genome_id='${esc(acc)}' AND locus_tag='${esc(locus)}' LIMIT 1),
-  'exp_verified'
-);
-        `.trim());
+          sql.push(`
+INSERT INTO core_regulation (curation_site_instance_id, gene_id, evidence_type, meta_site_id)
+SELECT
+  ${curationSiteInstanceIdExpr},
+  ${geneIdExpr},
+  '${esc(evidenceType)}',
+  NULL
+WHERE ${geneIdExpr} IS NOT NULL;
+          `.trim());
+        }
       }
     }
 
@@ -419,28 +538,32 @@ VALUES
     setLoading(true);
 
     try {
-      const sqlString = buildSql();
+      const sqlString = buildFullSql();
 
-      const res = await dispatchWorkflow({
+      await dispatchWorkflow({
         inputs: { queries: sqlString },
       });
 
-      // IMPORTANT: dispatchWorkflow returns the raw Response
-      if (!res?.ok) {
-        let payload = null;
-        try {
-          payload = await res.json();
-        } catch {
-          // ignore
-        }
-        const details = payload ? JSON.stringify(payload) : "";
-        throw new Error(`Dispatch failed (${res?.status || "?"}) ${details}`);
-      }
+      setStep7Data({
+        revisionReason,
+        curationComplete,
+        notes,
+        submittedAt: new Date().toISOString(),
+      });
 
-      setMsg("Submit OK: se han insertado/actualizado publication, TF, curation, sites, techniques y regulations.");
+      setMsg("✅ Submit OK: inserts/updates executed successfully.");
     } catch (e) {
-      console.error(e);
-      setMsg(`Error: ${e?.message || String(e)}`);
+      console.error("Submit error full:", e);
+      console.error("Submit error payload:", e?.payload);
+
+      const details =
+        typeof e?.payload === "string"
+          ? e.payload
+          : e?.payload
+            ? JSON.stringify(e.payload, null, 2)
+            : "";
+
+      setMsg(`Error: ${e?.message || String(e)}\n\n${details}`);
     } finally {
       setLoading(false);
     }
@@ -502,14 +625,14 @@ VALUES
           className="btn"
           onClick={handleSubmit}
           disabled={!canSubmit}
-          title={!canSubmit ? "Need TF name (Step 2) + publication (Step 1) first." : ""}
+          title={!canSubmit ? "Need Step1 + Step2 TF + Step4 completed." : ""}
         >
           {loading ? "Submitting..." : "Submit curation"}
         </button>
       </div>
 
       {msg && (
-        <div className={`text-sm ${msg.startsWith("Submit OK") ? "text-green-400" : "text-red-400"}`}>
+        <div className={`text-sm ${msg.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>
           {msg}
         </div>
       )}
