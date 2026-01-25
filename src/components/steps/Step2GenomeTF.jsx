@@ -6,6 +6,111 @@ const PROXY = "https://corsproxy.io/?";
 const ENTREZ_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb";
 
+// --------------------
+// TAXONOMY (safe)
+// --------------------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchJsonWithRetry(url, tries = 4, baseDelay = 600) {
+  let lastErr = null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(url);
+      if (r.status === 429) {
+        await sleep(baseDelay * Math.pow(2, i));
+        lastErr = new Error("429 Too Many Requests");
+        continue;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    } catch (e) {
+      lastErr = e;
+      await sleep(baseDelay * Math.pow(2, i));
+    }
+  }
+  throw lastErr || new Error("Fetch failed");
+}
+
+const taxonomyCacheByAcc = new Map();
+const taxonomyCacheByTaxId = new Map();
+
+async function fetchTaxIdFromNuccoreAcc(acc) {
+  const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(acc)}[accn]`;
+  const j1 = await fetchJsonWithRetry(PROXY + encodeURIComponent(url1));
+  const uid = j1?.esearchresult?.idlist?.[0];
+  if (!uid) return null;
+
+  const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=nuccore&id=${uid}&retmode=json`;
+  const j2 = await fetchJsonWithRetry(PROXY + encodeURIComponent(url2));
+  const rec = j2?.result?.[uid];
+  if (!rec) return null;
+
+  return {
+    taxId: rec.taxid ? String(rec.taxid) : null,
+    organism: rec.organism || "",
+    title: rec.title || "",
+  };
+}
+
+async function fetchTaxonomyNode(taxId) {
+  if (!taxId) return null;
+  if (taxonomyCacheByTaxId.has(taxId)) return taxonomyCacheByTaxId.get(taxId);
+
+  const url = `${ENTREZ_BASE}/esummary.fcgi?db=taxonomy&id=${encodeURIComponent(taxId)}&retmode=json`;
+  const j = await fetchJsonWithRetry(PROXY + encodeURIComponent(url));
+  const node = j?.result?.[taxId];
+  if (!node) return null;
+
+  const normalized = {
+    taxonomy_id: String(taxId),
+    name: node.scientificname || "",
+    rank: node.rank || "",
+    parent_taxonomy_id: node.parentid ? String(node.parentid) : null,
+  };
+
+  taxonomyCacheByTaxId.set(taxId, normalized);
+  return normalized;
+}
+
+async function computeTaxonomyChainForAcc(acc) {
+  if (taxonomyCacheByAcc.has(acc)) return taxonomyCacheByAcc.get(acc);
+
+  const base = await fetchTaxIdFromNuccoreAcc(acc);
+  if (!base?.taxId) throw new Error(`No taxId found for ${acc}`);
+
+  const chain = [];
+  const seen = new Set();
+  let current = await fetchTaxonomyNode(base.taxId);
+  let depth = 0;
+
+  while (current && depth < 60) {
+    if (seen.has(current.taxonomy_id)) break;
+    seen.add(current.taxonomy_id);
+
+    chain.push({
+      taxonomy_id: current.taxonomy_id,
+      name: current.name,
+      rank: current.rank,
+      parent_taxonomy_id: current.parent_taxonomy_id,
+    });
+
+    if (!current.parent_taxonomy_id) break;
+    current = await fetchTaxonomyNode(current.parent_taxonomy_id);
+    depth++;
+  }
+
+  const payload = {
+    accession: acc,
+    leafTaxId: base.taxId,
+    organism: base.organism || "",
+    title: base.title || "",
+    chain,
+  };
+
+  taxonomyCacheByAcc.set(acc, payload);
+  return payload;
+}
+
 export default function Step2GenomeTF() {
   const {
     tf,
@@ -359,6 +464,25 @@ export default function Step2GenomeTF() {
       ...genomeItems,
       { accession, description, organism },
     ];
+
+    // Calculate taxonomy silently (no UI)
+    try {
+      const exists = taxonomyData?.byAccession?.[accession];
+      if (!exists) {
+        const taxPayload = await computeTaxonomyChainForAcc(accession);
+
+        setTaxonomyData((prev) => ({
+          ...prev,
+          byAccession: {
+            ...(prev?.byAccession || {}),
+            [accession]: taxPayload,
+          },
+        }));
+      }
+    } catch (e) {
+      console.warn(`Taxonomy compute failed for ${accession}:`, e?.message || e);
+      // do not block the step
+    }
 
     setGenomeItems(updated);
     setGenomeList(updated);
