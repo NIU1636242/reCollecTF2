@@ -1,110 +1,139 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { runQuery } from "../../db/queryExecutor";
 import { useCuration } from "../../context/CurationContext";
 
-const PROXY = "https://corsproxy.io/?";
 const ENTREZ_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb";
 
 // --------------------
-// TAXONOMY (safe)
+// SAFE NETWORK HELPERS (NO PROXY, NO 429)
 // --------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchJsonWithRetry(url, tries = 4, baseDelay = 600) {
-  let lastErr = null;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const r = await fetch(url);
-      if (r.status === 429) {
-        await sleep(baseDelay * Math.pow(2, i));
-        lastErr = new Error("429 Too Many Requests");
-        continue;
-      }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return await r.json();
-    } catch (e) {
-      lastErr = e;
-      await sleep(baseDelay * Math.pow(2, i));
-    }
-  }
-  throw lastErr || new Error("Fetch failed");
+// Global rate limit for NCBI calls: 1 request / 700ms
+let __lastNcbiTs = 0;
+async function ncbiRateLimit() {
+  const now = Date.now();
+  const wait = Math.max(0, 700 - (now - __lastNcbiTs));
+  if (wait) await sleep(wait);
+  __lastNcbiTs = Date.now();
 }
 
-const taxonomyCacheByAcc = new Map();
-const taxonomyCacheByTaxId = new Map();
+async function fetchJson(url, { isNcbi = false } = {}) {
+  if (isNcbi) await ncbiRateLimit();
 
-async function fetchTaxIdFromNuccoreAcc(acc) {
+  const r = await fetch(url, {
+    method: "GET",
+    headers: { "Accept": "application/json" },
+  });
+
+  if (!r.ok) {
+    throw new Error(`Fetch failed ${r.status} for ${url}`);
+  }
+  return await r.json();
+}
+
+// --------------------
+// TAXONOMY (definitive, 1 call for lineage)
+// --------------------
+const taxonomyCacheByAcc = new Map(); // acc -> payload
+const nuccoreCacheByAcc = new Map();  // acc -> {taxid, organism, title}
+
+async function fetchNuccoreTaxInfo(acc) {
+  if (nuccoreCacheByAcc.has(acc)) return nuccoreCacheByAcc.get(acc);
+
+  // 1) esearch nuccore to get UID
   const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(acc)}[accn]`;
-  const j1 = await fetchJsonWithRetry(PROXY + encodeURIComponent(url1));
+  const j1 = await fetchJson(url1, { isNcbi: true });
   const uid = j1?.esearchresult?.idlist?.[0];
   if (!uid) return null;
 
+  // 2) esummary nuccore to get taxid + organism + title
   const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=nuccore&id=${uid}&retmode=json`;
-  const j2 = await fetchJsonWithRetry(PROXY + encodeURIComponent(url2));
+  const j2 = await fetchJson(url2, { isNcbi: true });
   const rec = j2?.result?.[uid];
   if (!rec) return null;
 
-  return {
-    taxId: rec.taxid ? String(rec.taxid) : null,
+  const out = {
+    taxid: rec.taxid ? String(rec.taxid) : "",
     organism: rec.organism || "",
     title: rec.title || "",
   };
+
+  nuccoreCacheByAcc.set(acc, out);
+  return out;
 }
 
-async function fetchTaxonomyNode(taxId) {
-  if (!taxId) return null;
-  if (taxonomyCacheByTaxId.has(taxId)) return taxonomyCacheByTaxId.get(taxId);
+async function fetchTaxonomyLineageEx(taxid) {
+  // taxonomy esummary returns lineageex in many cases
+  const url = `${ENTREZ_BASE}/esummary.fcgi?db=taxonomy&id=${encodeURIComponent(taxid)}&retmode=json`;
+  const j = await fetchJson(url, { isNcbi: true });
 
-  const url = `${ENTREZ_BASE}/esummary.fcgi?db=taxonomy&id=${encodeURIComponent(taxId)}&retmode=json`;
-  const j = await fetchJsonWithRetry(PROXY + encodeURIComponent(url));
-  const node = j?.result?.[taxId];
+  const node = j?.result?.[String(taxid)];
   if (!node) return null;
 
-  const normalized = {
-    taxonomy_id: String(taxId),
+  // lineageex: array of {taxid, scientificname, rank}
+  const lineageEx = Array.isArray(node.lineageex) ? node.lineageex : [];
+
+  const path = lineageEx.map((x) => ({
+    taxid: x?.taxid ? String(x.taxid) : "",
+    name: x?.scientificname || "",
+    rank: x?.rank || "no rank",
+  }));
+
+  // leaf node itself
+  const leaf = {
+    taxid: String(taxid),
     name: node.scientificname || "",
-    rank: node.rank || "",
-    parent_taxonomy_id: node.parentid ? String(node.parentid) : null,
+    rank: node.rank || "no rank",
   };
 
-  taxonomyCacheByTaxId.set(taxId, normalized);
-  return normalized;
+  // Add leaf if missing
+  if (!path.length || path[path.length - 1].taxid !== leaf.taxid) {
+    path.push(leaf);
+  }
+
+  // Clean duplicates / empties
+  const seen = new Set();
+  const cleaned = [];
+  for (const n of path) {
+    if (!n.taxid || seen.has(n.taxid)) continue;
+    seen.add(n.taxid);
+    cleaned.push(n);
+  }
+
+  // Build parent links (for DB insert later)
+  // parent_taxid of each node is previous one; root has null
+  const withParent = cleaned.map((n, i) => ({
+    taxonomy_id: n.taxid,
+    name: n.name,
+    rank: n.rank,
+    parent_taxonomy_id: i === 0 ? null : cleaned[i - 1].taxid,
+  }));
+
+  return withParent;
 }
 
-async function computeTaxonomyChainForAcc(acc) {
+async function computeTaxonomyForAcc(acc) {
   if (taxonomyCacheByAcc.has(acc)) return taxonomyCacheByAcc.get(acc);
 
-  const base = await fetchTaxIdFromNuccoreAcc(acc);
-  if (!base?.taxId) throw new Error(`No taxId found for ${acc}`);
+  const info = await fetchNuccoreTaxInfo(acc);
+  if (!info?.taxid) {
+    throw new Error(`No taxid for accession ${acc}`);
+  }
 
-  const chain = [];
-  const seen = new Set();
-  let current = await fetchTaxonomyNode(base.taxId);
-  let depth = 0;
-
-  while (current && depth < 60) {
-    if (seen.has(current.taxonomy_id)) break;
-    seen.add(current.taxonomy_id);
-
-    chain.push({
-      taxonomy_id: current.taxonomy_id,
-      name: current.name,
-      rank: current.rank,
-      parent_taxonomy_id: current.parent_taxonomy_id,
-    });
-
-    if (!current.parent_taxonomy_id) break;
-    current = await fetchTaxonomyNode(current.parent_taxonomy_id);
-    depth++;
+  const chain = await fetchTaxonomyLineageEx(info.taxid);
+  if (!chain?.length) {
+    throw new Error(`No taxonomy lineage for taxid ${info.taxid}`);
   }
 
   const payload = {
     accession: acc,
-    leafTaxId: base.taxId,
-    organism: base.organism || "",
-    title: base.title || "",
-    chain,
+    organism: info.organism || "",
+    title: info.title || "",
+    taxid: info.taxid,
+    chain, // [{taxonomy_id,name,rank,parent_taxonomy_id}, ...]
+    computedAt: new Date().toISOString(),
   };
 
   taxonomyCacheByAcc.set(acc, payload);
@@ -128,7 +157,7 @@ export default function Step2GenomeTF() {
     setTaxonomyData,
   } = useCuration();
 
-  //TF
+  // TF
   const [searchName, setSearchName] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [tfRow, setTfRow] = useState(null);
@@ -145,22 +174,22 @@ export default function Step2GenomeTF() {
 
   const [finalError, setFinalError] = useState("");
 
-  //Genome
+  // Genome
   const [genomeInput, setGenomeInput] = useState("");
   const [genomeSuggestions, setGenomeSuggestions] = useState([]);
   const [genomeItems, setGenomeItems] = useState([]);
 
-  //UniProt
+  // UniProt
   const [uniprotInput, setUniprotInput] = useState("");
   const [uniprotSuggestions, setUniprotSuggestions] = useState([]);
   const [uniProtItems, setUniProtItems] = useState([]);
 
-  //RefSeq
+  // RefSeq
   const [refseqInput, setRefseqInput] = useState("");
   const [refseqSuggestions, setRefseqSuggestions] = useState([]);
   const [refseqItems, setRefseqItems] = useState([]);
 
-  //Checkboxes
+  // Checkboxes
   const [sameStrainGenome, setSameStrainGenome] = useState(false);
   const [bindingOrganism, setBindingOrganism] = useState("");
 
@@ -170,123 +199,7 @@ export default function Step2GenomeTF() {
   const [promoterInfo, setPromoterInfo] = useState(false);
   const [expressionInfo, setExpressionInfo] = useState(false);
 
-  // -------------------------
-  // TAXONOMY HELPERS
-  // -------------------------
-
-  async function fetchJsonViaProxy(url) {
-    const r = await fetch(PROXY + encodeURIComponent(url));
-    if (!r.ok) throw new Error(`Fetch failed: ${r.status} ${r.statusText}`);
-    return r.json();
-  }
-
-  async function fetchTextViaProxy(url) {
-    const r = await fetch(PROXY + encodeURIComponent(url));
-    if (!r.ok) throw new Error(`Fetch failed: ${r.status} ${r.statusText}`);
-    return r.text();
-  }
-
-  // accession -> nuccore UID
-  async function accessionToNuccoreUid(acc) {
-    const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(acc)}[accn]`;
-    const j1 = await fetchJsonViaProxy(url1);
-    const uid = j1.esearchresult?.idlist?.[0];
-    return uid || null;
-  }
-
-  // nuccore UID -> organism + taxid (esummary)
-  async function fetchNuccoreSummaryWithTaxidByUid(uid) {
-    const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=nuccore&id=${uid}&retmode=json`;
-    const j2 = await fetchJsonViaProxy(url2);
-    const rec = j2.result?.[uid];
-    if (!rec) return null;
-
-    const organism = rec.organism || "";
-    const title = rec.title || "";
-    const taxid = rec.taxid ? String(rec.taxid) : "";
-
-    return { title, organism, taxid };
-  }
-
-  // accession -> {title, organism, taxid}
-  async function fetchNuccoreSummaryWithTaxid(acc) {
-    const uid = await accessionToNuccoreUid(acc);
-    if (!uid) return null;
-    return fetchNuccoreSummaryWithTaxidByUid(uid);
-  }
-
-  // taxid -> taxonomy lineage path [{taxid,name,rank}, ...] including leaf
-  async function fetchTaxonomyPathByTaxid(taxid) {
-    if (!taxid) return null;
-
-    const url = `${ENTREZ_BASE}/efetch.fcgi?db=taxonomy&id=${encodeURIComponent(taxid)}`;
-    const xmlText = await fetchTextViaProxy(url);
-
-    const dom = new DOMParser().parseFromString(xmlText, "text/xml");
-    const taxaSet = dom.getElementsByTagName("TaxaSet")[0];
-    const mainTaxon = taxaSet?.getElementsByTagName("Taxon")[0];
-    if (!mainTaxon) return null;
-
-    const lineageEx = mainTaxon.getElementsByTagName("LineageEx")[0];
-    const lineageTaxa = lineageEx ? Array.from(lineageEx.getElementsByTagName("Taxon")) : [];
-
-    const readTaxon = (node) => {
-      const get = (tag) => node.getElementsByTagName(tag)[0]?.textContent?.trim() || "";
-      return {
-        taxid: get("TaxId"),
-        name: get("ScientificName"),
-        rank: get("Rank") || "no rank",
-      };
-    };
-
-    const path = lineageTaxa.map(readTaxon);
-    const leaf = readTaxon(mainTaxon);
-
-    if (!path.length || path[path.length - 1].taxid !== leaf.taxid) {
-      path.push(leaf);
-    }
-
-    // Normaliza: sin vacíos y sin duplicados
-    const seen = new Set();
-    const cleaned = [];
-    for (const n of path) {
-      if (!n.taxid || seen.has(n.taxid)) continue;
-      seen.add(n.taxid);
-      cleaned.push(n);
-    }
-
-    return cleaned;
-  }
-
-  //Obtiene y guarda taxonomy “por detrás” para un accession dado
-  async function computeAndStoreTaxonomyForGenome(accession, fallbackOrganism = "") {
-    try {
-      const info = await fetchNuccoreSummaryWithTaxid(accession);
-      if (!info?.taxid) {
-        // Si NCBI no devolvió taxid, no rompemos el flujo.
-        return;
-      }
-
-      const path = await fetchTaxonomyPathByTaxid(info.taxid);
-      if (!Array.isArray(path) || path.length === 0) return;
-
-      // Guardamos por accession (soporta varios genomes)
-      setTaxonomyData((prev) => ({
-        ...(prev || {}),
-        [accession]: {
-          taxid: info.taxid,
-          organism: info.organism || fallbackOrganism || "",
-          path, // [{taxid,name,rank}, ...]
-          computedAt: new Date().toISOString(),
-        },
-      }));
-    } catch (e) {
-      // Silencioso: NO se muestra al usuario, solo log
-      console.warn("Taxonomy compute failed for", accession, e);
-    }
-  }
-
-  //Restaura les dades si tornem al step2
+  // Restore on back
   useEffect(() => {
     if (tf) {
       if (tf.TF_id) {
@@ -318,19 +231,26 @@ export default function Step2GenomeTF() {
       setExpressionInfo(strainData.expressionInfo || false);
     }
 
-    // si ya hay genomes restaurados y no hay taxonomyData, intenta calcularla
+    // If genomes already exist, compute taxonomy if missing (silent)
     if (genomeList?.length) {
-      for (const g of genomeList) {
+      genomeList.forEach((g) => {
         const acc = g?.accession;
-        if (!acc) continue;
-        if (taxonomyData?.[acc]?.path?.length) continue;
-        computeAndStoreTaxonomyForGenome(acc, g.organism || g.description || "");
-      }
+        if (!acc) return;
+        if (taxonomyData?.[acc]?.chain?.length) return;
+
+        computeTaxonomyForAcc(acc)
+          .then((payload) => {
+            setTaxonomyData((prev) => ({ ...(prev || {}), [acc]: payload }));
+          })
+          .catch((e) => {
+            console.warn("Taxonomy compute failed:", acc, e?.message || e);
+          });
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  //Load families de la base de dades
+  // Load families
   useEffect(() => {
     async function loadFamilies() {
       const rows = await runQuery(`
@@ -342,7 +262,7 @@ export default function Step2GenomeTF() {
     loadFamilies();
   }, []);
 
-  //Autocompletar TF
+  // Autocomplete TF
   async function handleAutocompleteTF(val) {
     setSearchName(val);
     setTfRow(null);
@@ -363,11 +283,9 @@ export default function Step2GenomeTF() {
       `,
       [val]
     );
-
     setSuggestions(rows);
   }
 
-  //Carrega el TF quan s'autocompleta
   async function loadTF(name) {
     const rows = await runQuery(
       `
@@ -391,7 +309,6 @@ export default function Step2GenomeTF() {
     }
   }
 
-  //Crear nou TF
   function saveNewTF() {
     setFinalError("");
 
@@ -436,7 +353,7 @@ export default function Step2GenomeTF() {
     setShowCreateForm(false);
   }
 
-  //Autocompletar Genome + Auto-add al seleccionar
+  // Genome autocomplete from DB
   async function handleAutocompleteGenome(val) {
     setGenomeInput(val);
 
@@ -460,47 +377,109 @@ export default function Step2GenomeTF() {
   async function addGenomeItem(accession, description, organism) {
     if (genomeItems.some((x) => x.accession === accession)) return;
 
-    const updated = [
-      ...genomeItems,
-      { accession, description, organism },
-    ];
-
-    // Calculate taxonomy silently (no UI)
-    try {
-      const exists = taxonomyData?.byAccession?.[accession];
-      if (!exists) {
-        const taxPayload = await computeTaxonomyChainForAcc(accession);
-
-        setTaxonomyData((prev) => ({
-          ...prev,
-          byAccession: {
-            ...(prev?.byAccession || {}),
-            [accession]: taxPayload,
-          },
-        }));
-      }
-    } catch (e) {
-      console.warn(`Taxonomy compute failed for ${accession}:`, e?.message || e);
-      // do not block the step
-    }
-
+    const updated = [...genomeItems, { accession, description, organism }];
     setGenomeItems(updated);
     setGenomeList(updated);
 
-    // TAXONOMY: calcula en background al añadir
-    if (!taxonomyData?.[accession]?.path?.length) {
-      computeAndStoreTaxonomyForGenome(accession, organism || description || "");
+    // TAXONOMY: compute silently and store in context
+    if (!taxonomyData?.[accession]?.chain?.length) {
+      computeTaxonomyForAcc(accession)
+        .then((payload) => {
+          setTaxonomyData((prev) => ({ ...(prev || {}), [accession]: payload }));
+        })
+        .catch((e) => {
+          console.warn("Taxonomy compute failed:", accession, e?.message || e);
+        });
     }
   }
 
-  //al select la suggestion
   function selectGenomeSuggestion(g) {
     addGenomeItem(g.genome_accession, g.organism, g.organism);
     setGenomeSuggestions([]);
     setGenomeInput("");
   }
 
-  //Autocompletar UniProt + Auto-add al seleccionar
+  // Fetch genome summary (NO PROXY)
+  async function fetchNuccoreSummary(acc) {
+    const info = await fetchNuccoreTaxInfo(acc);
+    if (!info) return null;
+    return { title: info.title, organism: info.organism };
+  }
+
+  // UniProt (NO PROXY)
+  async function fetchUniprotSummary(acc) {
+    try {
+      const url = `${UNIPROT_BASE}/${encodeURIComponent(acc)}.json`;
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      const j = await r.json();
+
+      const name =
+        j.proteinDescription?.recommendedName?.fullName?.value ||
+        j.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
+        "";
+
+      return {
+        title: name || j.id || acc,
+        organism: j.organism?.scientificName || "",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // RefSeq protein summary (NO PROXY)
+  async function fetchProteinSummary(acc) {
+    const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=protein&retmode=json&term=${encodeURIComponent(acc)}[accn]`;
+    const j1 = await fetchJson(url1, { isNcbi: true });
+    const uid = j1?.esearchresult?.idlist?.[0];
+    if (!uid) return null;
+
+    const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=protein&id=${uid}&retmode=json`;
+    const j2 = await fetchJson(url2, { isNcbi: true });
+    const rec = j2?.result?.[uid];
+    return rec ? { title: rec.title } : null;
+  }
+
+  // Genome Enter
+  async function handleGenomeEnter() {
+    const acc = genomeInput.trim();
+    if (!acc) return;
+
+    if (genomeItems.some((g) => g.accession === acc)) {
+      setGenomeInput("");
+      return;
+    }
+
+    // Try DB first
+    const rows = await runQuery(
+      `
+      SELECT genome_id, genome_accession, organism
+      FROM core_genome
+      WHERE genome_accession = ?
+      LIMIT 1
+      `,
+      [acc]
+    );
+
+    if (rows.length) {
+      const g = rows[0];
+      await addGenomeItem(g.genome_accession, g.organism, g.organism);
+      setGenomeInput("");
+      setGenomeSuggestions([]);
+      return;
+    }
+
+    // If not in DB, fetch from NCBI directly
+    const info = await fetchNuccoreSummary(acc);
+    if (!info) return;
+
+    await addGenomeItem(acc, info.title, info.organism);
+    setGenomeInput("");
+    setGenomeSuggestions([]);
+  }
+
+  // UniProt autocomplete from DB
   async function handleAutocompleteUniprot(val) {
     setUniprotInput(val);
 
@@ -530,7 +509,7 @@ export default function Step2GenomeTF() {
   }
 
   function selectUniProtSuggestion(u) {
-    addUniProtItem(u.uniprot_accession, u.description);
+    addUniProtItem(u.uniprot_accession, u.description || "");
 
     if (u.refseq_accession) {
       if (!refseqItems.some((x) => x.accession === u.refseq_accession)) {
@@ -542,143 +521,6 @@ export default function Step2GenomeTF() {
     setUniprotInput("");
   }
 
-  //Autocompletar RefSeq + Auto-add al seleccionar
-  async function handleAutocompleteRefseq(val) {
-    setRefseqInput(val);
-
-    if (!val) {
-      setRefseqSuggestions([]);
-      return;
-    }
-
-    const rows = await runQuery(
-      `
-      SELECT TF_instance_id, refseq_accession, description
-      FROM core_tfinstance
-      WHERE refseq_accession LIKE ? || '%'
-      ORDER BY refseq_accession ASC
-      `,
-      [val]
-    );
-    setRefseqSuggestions(rows);
-  }
-
-  function addRefseqItem(accession, description) {
-    if (refseqItems.some((x) => x.accession === accession)) return;
-
-    const updated = [...refseqItems, { accession, description }];
-    setRefseqItems(updated);
-    setRefseqList(updated);
-  }
-
-  function selectRefseqSuggestion(r) {
-    addRefseqItem(r.refseq_accession, r.description);
-    setRefseqSuggestions([]);
-    setRefseqInput("");
-  }
-
-  //Buscar Genoma a la API nuccore (tu versión antigua)
-  async function fetchNuccoreSummary(acc) {
-    const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=nuccore&retmode=json&term=${encodeURIComponent(acc)}[accn]`;
-    const r1 = await fetch(PROXY + encodeURIComponent(url1));
-    const j1 = await r1.json();
-    const uid = j1.esearchresult?.idlist?.[0];
-    if (!uid) return null;
-
-    const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=nuccore&id=${uid}&retmode=json`;
-    const r2 = await fetch(PROXY + encodeURIComponent(url2));
-    const j2 = await r2.json();
-    const rec = j2.result?.[uid];
-    if (!rec) return null;
-
-    return { title: rec.title, organism: rec.organism };
-  }
-
-  //Buscar UniProt
-  async function fetchUniprotSummary(acc) {
-    try {
-      const url = `${UNIPROT_BASE}/${encodeURIComponent(acc)}.json`;
-      const r = await fetch(PROXY + encodeURIComponent(url));
-      if (!r.ok) return null;
-      const j = await r.json();
-
-      const name =
-        j.proteinDescription?.recommendedName?.fullName?.value ||
-        j.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
-        "";
-
-      return {
-        title: name || j.id || acc,
-        organism: j.organism?.scientificName || "",
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  //Buscar RefSeq
-  async function fetchProteinSummary(acc) {
-    const url1 = `${ENTREZ_BASE}/esearch.fcgi?db=protein&retmode=json&term=${encodeURIComponent(acc)}[accn]`;
-    const r1 = await fetch(PROXY + encodeURIComponent(url1));
-    const j1 = await r1.json();
-    const uid = j1.esearchresult?.idlist?.[0];
-    if (!uid) return null;
-
-    const url2 = `${ENTREZ_BASE}/esummary.fcgi?db=protein&id=${uid}&retmode=json`;
-    const r2 = await fetch(PROXY + encodeURIComponent(url2));
-    const j2 = await r2.json();
-    const rec = j2.result?.[uid];
-
-    return rec ? { title: rec.title } : null;
-  }
-
-  //Genome Enter
-  async function handleGenomeEnter() {
-    const acc = genomeInput.trim();
-    if (!acc) return;
-
-    if (genomeItems.some((g) => g.accession === acc)) {
-      setGenomeInput("");
-      return;
-    }
-
-    const rows = await runQuery(
-      `
-      SELECT genome_id, genome_accession, organism
-      FROM core_genome
-      WHERE genome_accession = ?
-      LIMIT 1
-      `,
-      [acc]
-    );
-
-    if (rows.length) {
-      const g = rows[0];
-      await addGenomeItem(g.genome_accession, g.organism, g.organism);
-      setGenomeInput("");
-      setGenomeSuggestions([]);
-
-      //TAXONOMY: aunque venga de DB, intenta calcular taxonomía si no la tienes
-      if (!taxonomyData?.[g.genome_accession]?.path?.length) {
-        computeAndStoreTaxonomyForGenome(g.genome_accession, g.organism || "");
-      }
-      return;
-    }
-
-    const info = await fetchNuccoreSummary(acc);
-    if (!info) return;
-
-    await addGenomeItem(acc, info.title, info.organism);
-    setGenomeInput("");
-    setGenomeSuggestions([]);
-
-    //TAXONOMY: para genome nuevo (API), también
-    if (!taxonomyData?.[acc]?.path?.length) {
-      computeAndStoreTaxonomyForGenome(acc, info.organism || "");
-    }
-  }
-
-  //Uniprot Enter
   async function handleUniprotEnter() {
     const acc = uniprotInput.trim();
     if (!acc) return;
@@ -721,7 +563,41 @@ export default function Step2GenomeTF() {
     setUniprotSuggestions([]);
   }
 
-  //Refseq Enter
+  // RefSeq autocomplete from DB
+  async function handleAutocompleteRefseq(val) {
+    setRefseqInput(val);
+
+    if (!val) {
+      setRefseqSuggestions([]);
+      return;
+    }
+
+    const rows = await runQuery(
+      `
+      SELECT TF_instance_id, refseq_accession, description
+      FROM core_tfinstance
+      WHERE refseq_accession LIKE ? || '%'
+      ORDER BY refseq_accession ASC
+      `,
+      [val]
+    );
+    setRefseqSuggestions(rows);
+  }
+
+  function addRefseqItem(accession, description) {
+    if (refseqItems.some((x) => x.accession === accession)) return;
+
+    const updated = [...refseqItems, { accession, description }];
+    setRefseqItems(updated);
+    setRefseqList(updated);
+  }
+
+  function selectRefseqSuggestion(r) {
+    addRefseqItem(r.refseq_accession, r.description || "");
+    setRefseqSuggestions([]);
+    setRefseqInput("");
+  }
+
   async function handleRefseqEnter() {
     const acc = refseqInput.trim();
     if (!acc) return;
@@ -757,12 +633,11 @@ export default function Step2GenomeTF() {
     setRefseqSuggestions([]);
   }
 
-  //Remove icons
+  // Remove icons
   function removeGenome(index) {
     const updated = genomeItems.filter((_, i) => i !== index);
     setGenomeItems(updated);
     setGenomeList(updated);
-    // no hace falta borrar taxonomyData; puedes dejarlo cacheado
   }
 
   function removeUniProt(index) {
@@ -777,7 +652,7 @@ export default function Step2GenomeTF() {
     setRefseqList(updated);
   }
 
-  //Final confirm
+  // Final confirm
   function handleFinalConfirm() {
     setFinalError("");
 
@@ -785,27 +660,22 @@ export default function Step2GenomeTF() {
       setFinalError("You must select or create a TF before continuing.");
       return;
     }
-
     if (genomeItems.length === 0) {
       setFinalError("Please add at least one genome accession.");
       return;
     }
-
     if (uniProtItems.length === 0) {
       setFinalError("Please add at least one UniProt accession.");
       return;
     }
-
     if (refseqItems.length === 0) {
       setFinalError("Please add at least one RefSeq accession.");
       return;
     }
-
     if (!sameStrainGenome && !bindingOrganism.trim()) {
       setFinalError("Please specify the organism where TF binding sites are reported.");
       return;
     }
-
     if (!sameStrainTF && !reportedTFOrganism.trim()) {
       setFinalError("Please specify the organism of origin for the TF.");
       return;
@@ -828,7 +698,7 @@ export default function Step2GenomeTF() {
     goToNextStep();
   }
 
-  //RENDER
+  // RENDER
   return (
     <div className="space-y-8">
       <h2 className="text-2xl font-bold">Step 2 – Genome & TF</h2>
@@ -881,35 +751,25 @@ export default function Step2GenomeTF() {
       {tfRow && (
         <div className="bg-surface border border-border rounded p-4 space-y-2">
           <h3 className="text-lg font-semibold text-accent">{tfRow.name}</h3>
-          <p>
-            <strong>ID:</strong> {tfRow.TF_id}
-          </p>
-          <p>
-            <strong>Family:</strong> {tfRow.family_name}
-          </p>
-          <p>
-            <strong>TF Description:</strong> {tfRow.description || "—"}
-          </p>
-          <p>
-            <strong>Family Description:</strong>{" "}
-            {tfRow.family_description || "—"}
-          </p>
+          <p><strong>ID:</strong> {tfRow.TF_id}</p>
+          <p><strong>Family:</strong> {tfRow.family_name}</p>
+          <p><strong>TF Description:</strong> {tfRow.description || "—"}</p>
+          <p><strong>Family Description:</strong> {tfRow.family_description || "—"}</p>
         </div>
       )}
 
-      {/*  CREATE TF  */}
+      {/* CREATE TF */}
       {showCreateForm && (
         <div className="bg-surface border border-border rounded p-4 space-y-3">
           <h3 className="text-lg font-semibold text-accent">Create New TF</h3>
+
           <div>
             <label className="block font-medium mb-1">TF Name</label>
-            <div className="flex gap-2">
-              <input
-                className="form-control flex-1"
-                value={newTFName}
-                onChange={(e) => setNewTFName(e.target.value)}
-              />
-            </div>
+            <input
+              className="form-control flex-1"
+              value={newTFName}
+              onChange={(e) => setNewTFName(e.target.value)}
+            />
           </div>
 
           <div>
@@ -979,7 +839,6 @@ export default function Step2GenomeTF() {
             <button type="button" className="btn" onClick={saveNewTF}>
               Save TF
             </button>
-
             <button
               type="button"
               className="btn"
@@ -991,16 +850,14 @@ export default function Step2GenomeTF() {
               Cancel
             </button>
           </div>
-
         </div>
       )}
 
-      {/*  GENOME  */}
+      {/* GENOME */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Genome NCBI accession number</h3>
         <p className="text-sm text-muted">
-          Paste the NCBI GenBank genome accession for the closest species or
-          strain.
+          Paste the NCBI GenBank genome accession for the closest species or strain.
         </p>
 
         <input
@@ -1038,8 +895,6 @@ export default function Step2GenomeTF() {
                   <span>
                     <strong>{g.accession}</strong> — {g.description}
                   </span>
-
-                  {/* Trash icon */}
                   <button
                     type="button"
                     onClick={() => removeGenome(i)}
@@ -1066,17 +921,13 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* checkbox AFTER genome */}
         <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
             checked={sameStrainGenome}
             onChange={(e) => setSameStrainGenome(e.target.checked)}
           />
-          <span>
-            This is the exact same strain as reported in the manuscript for the
-            sites.
-          </span>
+          <span>This is the exact same strain as reported in the manuscript for the sites.</span>
         </label>
 
         {!sameStrainGenome && (
@@ -1099,12 +950,10 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/*  UNIPROT  */}
+      {/* UNIPROT */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF UniProt accession number</h3>
-        <p className="text-sm text-muted">
-          Paste the UniProt accession for the TF.
-        </p>
+        <p className="text-sm text-muted">Paste the UniProt accession for the TF.</p>
 
         <input
           className="form-control flex-1"
@@ -1169,12 +1018,10 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/*  REFSEQ  */}
+      {/* REFSEQ */}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">TF NCBI RefSeq accession</h3>
-        <p className="text-sm text-muted">
-          Enter RefSeq TF protein accession.
-        </p>
+        <p className="text-sm text-muted">Enter RefSeq TF protein accession.</p>
 
         <input
           className="form-control flex-1"
@@ -1238,17 +1085,13 @@ export default function Step2GenomeTF() {
           </ul>
         )}
 
-        {/* checkbox AFTER refseq */}
         <label className="inline-flex items-center gap-2 text-sm mt-2">
           <input
             type="checkbox"
             checked={sameStrainTF}
             onChange={(e) => setSameStrainTF(e.target.checked)}
           />
-          <span>
-            This is the exact same strain as reported in the manuscript for the
-            TF.
-          </span>
+          <span>This is the exact same strain as reported in the manuscript for the TF.</span>
         </label>
 
         {!sameStrainTF && (
@@ -1271,7 +1114,7 @@ export default function Step2GenomeTF() {
         )}
       </div>
 
-      {/*  PROMOTER / EXPRESSION  */}
+      {/* PROMOTER / EXPRESSION */}
       <div className="space-y-3 text-sm">
         <label className="flex items-start gap-2">
           <input
@@ -1304,16 +1147,14 @@ export default function Step2GenomeTF() {
         </label>
       </div>
 
-      {/*  FINAL BUTTON  */}
+      {/* FINAL BUTTON */}
       <div className="mt-6">
         <button className="btn" onClick={handleFinalConfirm}>
           Confirm and continue →
         </button>
       </div>
 
-      {finalError && (
-        <p className="text-red-400 text-sm mt-2">{finalError}</p>
-      )}
+      {finalError && <p className="text-red-400 text-sm mt-2">{finalError}</p>}
     </div>
   );
 }
