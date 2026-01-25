@@ -302,14 +302,6 @@ VALUES
 
     const curationIdExpr = `(SELECT curation_id FROM core_curation WHERE publication_id=${publicationIdExpr} ORDER BY curation_id DESC LIMIT 1)`;
 
-    // Optional table in your real DB (seen in logs): core_curation_confidence
-    sql.push(`
-INSERT INTO core_curation_confidence (curation_id, confidence)
-SELECT ${curationIdExpr}, 0
-WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_curation_confidence')
-  AND NOT EXISTS (SELECT 1 FROM core_curation_confidence WHERE curation_id=${curationIdExpr});
-    `.trim());
-
     // Link TF instance to curation
     sql.push(`
 INSERT INTO core_curation_TF_instances (curation_id, tfinstance_id)
