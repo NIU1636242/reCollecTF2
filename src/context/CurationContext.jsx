@@ -73,7 +73,7 @@ export function CurationProvider({ children }) {
         setStep6Data,
         step7Data,
         setStep7Data,
-        genomes,
+        genomes, 
         setGenomes
       }}
     >
