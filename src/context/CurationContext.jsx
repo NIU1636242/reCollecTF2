@@ -41,6 +41,7 @@ export function CurationProvider({ children }) {
 
   const [step7Data, setStep7Data] = useState(null);
 
+  const [taxonomyData, setTaxonomyData] = useState({ byAccession: {} });
 
   const goToNextStep = () => setCurrentStep((s) => s + 1); //anar al següent pas
   const goToStep = (n) => setCurrentStep(n); //anar a qualsevol pas
