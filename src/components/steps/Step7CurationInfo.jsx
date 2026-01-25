@@ -255,6 +255,7 @@ WHERE lower(name)=lower('${esc(tfName)}');
     `.trim());
 
     const tfIdExpr = `(SELECT TF_id FROM core_tf WHERE lower(name)=lower('${esc(tfName)}') LIMIT 1)`;
+    const forceTfOverride = !!tf?.isNew; 
 
     // --------------------
     // 3) TF Instance (core_tfinstance) (MATCH SCHEMA: description NOT NULL, notes NOT NULL, refseq/uniprot NOT NULL)
@@ -275,12 +276,13 @@ WHERE NOT EXISTS (
     sql.push(`
 UPDATE core_tfinstance
 SET
-  TF_id = COALESCE(TF_id, ${tfIdExpr}),
+  TF_id = ${forceTfOverride ? `${tfIdExpr}` : `COALESCE(TF_id, ${tfIdExpr})`},
   refseq_accession = COALESCE(NULLIF(refseq_accession,''), '${esc(refAcc)}'),
-  description = COALESCE(NULLIF(description,''), '${esc(tfInstanceDesc)}'),
+  description = ${forceTfOverride ? `'${esc(tfInstanceDesc)}'` : `COALESCE(NULLIF(description,''), '${esc(tfInstanceDesc)}')`},
   notes = COALESCE(notes, '')
 WHERE uniprot_accession='${esc(uniAcc)}';
     `.trim());
+
 
     const tfInstanceIdExpr = `(SELECT TF_instance_id FROM core_tfinstance WHERE uniprot_accession='${esc(uniAcc)}' LIMIT 1)`;
 

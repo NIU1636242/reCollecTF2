@@ -658,7 +658,7 @@ export default function Step4ReportedSites() {
           </div>
 
           {!allCompleted && (
-            <div className="mt-3 text-sm font-semibold text-amber-400">
+            <div className="text-xs text-muted">
               ⚠️ Select one valid mapping (exact or mismatch) for every site before continuing.
             </div>
           )}
