@@ -149,33 +149,29 @@ export default function Step5SiteAnnotation() {
     goToNextStep();
   }
 
-  // Column widths (tune here)
-  const SITE_COL_W = 360;
-  const TFTYPE_COL_W = 140;
-  const TFFUNC_COL_W = 160;
-  const TECH_COL_W = 150; // narrower so it compresses nicely
-
   return (
     <div className="space-y-8">
-      <h2 className="text-2xl font-bold">Step 5 – Site annotation</h2>
-
-      {/* min-w-0 is CRITICAL so this block can shrink next to the summary panel */}
-      <div className="bg-surface border border-border rounded p-4 min-w-0">
-        {/* Horizontal scroll only inside this container */}
-        <div className="overflow-x-auto max-w-full">
-          {/* table-fixed prevents content from forcing column widths */}
-          <table className="w-full text-xs border-collapse table-fixed">
-            <thead className="border-b border-border">
-              <tr>
-                <th className="text-left px-2 py-2" style={{ width: SITE_COL_W }}>
+    <h2 className="text-2xl font-bold">
+      Step 5 – Site annotation
+    </h2>
+      <div className="bg-surface border border-border rounded p-4">
+        {/* Scroll container so many techniques never overlap */}
+        <div className="overflow-x-auto">
+          <table className="min-w-max w-full text-xs border-collapse">
+            <thead>
+              {/* Single header row */}
+              <tr className="border-b border-border">
+                <th className="text-left px-2 py-2" style={{ minWidth: 360 }}>
                   Site
                 </th>
-                <th className="text-left px-2 py-2" style={{ width: TFTYPE_COL_W }}>
+                <th className="text-left px-2 py-2" style={{ minWidth: 140 }}>
                   TF-type
                 </th>
-                <th className="text-left px-2 py-2" style={{ width: TFFUNC_COL_W }}>
+                <th className="text-left px-2 py-2" style={{ minWidth: 160 }}>
                   TF-function
                 </th>
+
+                {/* This is the group header like in your screenshot */}
                 <th className="text-left px-2 py-2" colSpan={Math.max(1, techList.length)}>
                   Experimental techniques
                 </th>
@@ -183,55 +179,35 @@ export default function Step5SiteAnnotation() {
             </thead>
 
             <tbody>
-              {/* BULK ROW */}
+              {/* BULK ROW: Select/Unselect all + bulk TF controls + technique headers HERE */}
               <tr className="border-b border-border bg-muted/40">
-                <td className="px-2 py-2 align-top" style={{ width: SITE_COL_W }}>
-                  <button
-                    type="button"
-                    className="text-blue-400 hover:text-blue-300 underline text-[11px]"
-                    onClick={toggleSelectAll}
-                  >
+                <td className="px-2 py-2 align-top" style={{ minWidth: 360 }}>
+                  <button type="button" className="text-blue-400 hover:text-blue-300 underline" onClick={toggleSelectAll}>
                     Select/Unselect all
                   </button>
                 </td>
 
-                <td className="px-2 py-2 align-top" style={{ width: TFTYPE_COL_W }}>
+                <td className="px-2 py-2 align-top" style={{ minWidth: 140 }}>
                   <div className="flex flex-col gap-1">
-                    <select
-                      className="form-control text-xs"
-                      value={bulkTfType}
-                      onChange={(e) => setBulkTfType(e.target.value)}
-                    >
+                    <select className="form-control text-xs" value={bulkTfType} onChange={(e) => setBulkTfType(e.target.value)}>
                       {TF_TYPES.map((t) => (
                         <option key={t}>{t}</option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      className="text-blue-400 hover:text-blue-300 underline text-[11px] text-left"
-                      onClick={applyTfTypeToSelected}
-                    >
+                    <button type="button" className="text-blue-400 hover:text-blue-300 underline text-[11px]" onClick={applyTfTypeToSelected}>
                       Apply to selected
                     </button>
                   </div>
                 </td>
 
-                <td className="px-2 py-2 align-top" style={{ width: TFFUNC_COL_W }}>
+                <td className="px-2 py-2 align-top" style={{ minWidth: 160 }}>
                   <div className="flex flex-col gap-1">
-                    <select
-                      className="form-control text-xs"
-                      value={bulkTfFunc}
-                      onChange={(e) => setBulkTfFunc(e.target.value)}
-                    >
+                    <select className="form-control text-xs" value={bulkTfFunc} onChange={(e) => setBulkTfFunc(e.target.value)}>
                       {TF_FUNCS.map((t) => (
                         <option key={t}>{t}</option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      className="text-blue-400 hover:text-blue-300 underline text-[11px] text-left"
-                      onClick={applyTfFuncToSelected}
-                    >
+                    <button type="button" className="text-blue-400 hover:text-blue-300 underline text-[11px]" onClick={applyTfFuncToSelected}>
                       Apply to selected
                     </button>
                   </div>
@@ -239,24 +215,19 @@ export default function Step5SiteAnnotation() {
 
                 {techList.length > 0 ? (
                   techList.map((t) => (
-                    <td key={t.id} className="px-2 py-2 align-top" style={{ width: TECH_COL_W }}>
-                      {/* Compressed name (like original UI) */}
-                      <div className="font-semibold leading-4 truncate" title={t.label}>
-                        {t.label}
-                      </div>
-
-                      {/* Buttons stacked (one below the other) */}
-                      <div className="mt-1 flex flex-col gap-1 text-[11px]">
+                    <td key={t.id} className="px-2 py-2 align-top" style={{ minWidth: 190 }}>
+                      <div className="font-semibold leading-4 break-words">{t.label}</div>
+                      <div className="flex gap-2 text-[11px] mt-1 whitespace-nowrap">
                         <button
                           type="button"
-                          className="text-blue-400 hover:text-blue-300 underline text-left"
+                          className="text-blue-400 hover:text-blue-300 underline"
                           onClick={() => applyTechniqueToSelected(t.id)}
                         >
                           Apply to selected
                         </button>
                         <button
                           type="button"
-                          className="text-blue-400 hover:text-blue-300 underline text-left"
+                          className="text-blue-400 hover:text-blue-300 underline"
                           onClick={() => clearTechniqueAll(t.id)}
                         >
                           Clear all
@@ -280,7 +251,7 @@ export default function Step5SiteAnnotation() {
 
                 return (
                   <tr key={site} className="border-b border-border">
-                    <td className="px-2 py-2 align-top" style={{ width: SITE_COL_W }}>
+                    <td className="px-2 py-2 align-top" style={{ minWidth: 360 }}>
                       <label className="flex gap-2 cursor-pointer">
                         <input
                           type="checkbox"
@@ -292,13 +263,11 @@ export default function Step5SiteAnnotation() {
                             }))
                           }
                         />
-                        <span className="font-mono text-[11px] whitespace-pre-wrap break-words">
-                          {siteDisplayText(site)}
-                        </span>
+                        <span className="font-mono text-[11px] whitespace-pre-wrap">{siteDisplayText(site)}</span>
                       </label>
                     </td>
 
-                    <td className="px-2 py-2 align-top" style={{ width: TFTYPE_COL_W }}>
+                    <td className="px-2 py-2 align-top" style={{ minWidth: 140 }}>
                       <select
                         className="form-control text-xs"
                         value={ann.tfType}
@@ -315,7 +284,7 @@ export default function Step5SiteAnnotation() {
                       </select>
                     </td>
 
-                    <td className="px-2 py-2 align-top" style={{ width: TFFUNC_COL_W }}>
+                    <td className="px-2 py-2 align-top" style={{ minWidth: 160 }}>
                       <select
                         className="form-control text-xs"
                         value={ann.tfFunc}
@@ -334,11 +303,7 @@ export default function Step5SiteAnnotation() {
 
                     {techList.length > 0 ? (
                       techList.map((t) => (
-                        <td
-                          key={t.id}
-                          className="px-2 py-2 align-top text-center"
-                          style={{ width: TECH_COL_W }}
-                        >
+                        <td key={t.id} className="px-2 py-2 align-top text-center" style={{ minWidth: 190 }}>
                           <input
                             type="checkbox"
                             checked={!!ann.techniques?.[t.id]}

@@ -74,7 +74,9 @@ export function CurationProvider({ children }) {
         step7Data,
         setStep7Data,
         genomes, 
-        setGenomes
+        setGenomes,
+        taxonomyData,
+        setTaxonomyData,
       }}
     >
       {children}

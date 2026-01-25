@@ -71,6 +71,7 @@ export default function Step7CurationInfo() {
     step5Data,
     step6Data,
     setStep7Data,
+    taxonomyData
   } = useCuration();
 
   const REVISION_REASONS = useMemo(
@@ -95,6 +96,7 @@ export default function Step7CurationInfo() {
   const canSubmit = useMemo(() => {
     return !!publication && !!tf?.name && !!step4Data && !loading;
   }, [publication, tf, step4Data, loading]);
+
 
   // --------------------
   // BUILD SQL (full insert)
@@ -364,6 +366,68 @@ WHERE NOT EXISTS (
         }
       }
     }
+
+    // --------------------
+    // 5b) TAXONOMY (core_taxonomy) + link core_genome.taxonomy_id
+    // --------------------
+    const taxByAcc = taxonomyData || {};
+
+    for (const acc of accessions) {
+      const tInfo = taxByAcc?.[acc];
+      const path = Array.isArray(tInfo?.path) ? tInfo.path : [];
+      if (!path.length) continue;
+
+      // Inserta lineage en orden, asignando parent_id por subquery
+      for (let i = 0; i < path.length; i++) {
+        const node = path[i];
+        const taxid = String(node.taxid || "").trim();
+        const name = String(node.name || "").trim();
+        const rank = String(node.rank || "no rank").trim();
+
+        if (!taxid) continue;
+
+        const parentTaxid = i > 0 ? String(path[i - 1].taxid || "").trim() : "";
+        const parentIdExpr = parentTaxid
+          ? `(SELECT id FROM core_taxonomy WHERE taxonomy_id='${esc(parentTaxid)}' LIMIT 1)`
+          : "NULL";
+
+        // INSERT if missing
+        sql.push(`
+INSERT INTO core_taxonomy (taxonomy_id, rank, name, parent_id)
+SELECT
+  '${esc(taxid)}',
+  ${rank ? `'${esc(rank)}'` : "NULL"},
+  ${name ? `'${esc(name)}'` : "NULL"},
+  ${parentIdExpr}
+WHERE NOT EXISTS (
+  SELECT 1 FROM core_taxonomy WHERE taxonomy_id='${esc(taxid)}'
+);
+    `.trim());
+
+        // UPDATE to fill blanks + parent if null
+        sql.push(`
+UPDATE core_taxonomy
+SET
+  rank = COALESCE(NULLIF(rank,''), ${rank ? `'${esc(rank)}'` : "rank"}),
+  name = COALESCE(NULLIF(name,''), ${name ? `'${esc(name)}'` : "name"}),
+  parent_id = COALESCE(parent_id, ${parentIdExpr})
+WHERE taxonomy_id='${esc(taxid)}';
+    `.trim());
+      }
+
+      // Link genome -> leaf node
+      const leafTaxid = String(path[path.length - 1]?.taxid || "").trim();
+      if (leafTaxid) {
+        sql.push(`
+UPDATE core_genome
+SET taxonomy_id = (
+  SELECT id FROM core_taxonomy WHERE taxonomy_id='${esc(leafTaxid)}' LIMIT 1
+)
+WHERE genome_accession='${esc(acc)}';
+    `.trim());
+      }
+    }
+
 
     // --------------------
     // 6) Techniques (MATCH SCHEMA: name/description NOT NULL)
