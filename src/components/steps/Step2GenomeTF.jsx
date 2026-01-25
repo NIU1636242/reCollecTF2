@@ -1120,7 +1120,11 @@ export default function Step2GenomeTF() {
           <input
             type="checkbox"
             checked={promoterInfo}
-            onChange={(e) => setPromoterInfo(e.target.checked)}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setPromoterInfo(checked);
+              setStrainData((prev) => ({ ...(prev || {}), promoterInfo: checked }));
+            }}
           />
           <span>
             The manuscript contains promoter information.
@@ -1135,7 +1139,11 @@ export default function Step2GenomeTF() {
           <input
             type="checkbox"
             checked={expressionInfo}
-            onChange={(e) => setExpressionInfo(e.target.checked)}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setExpressionInfo(checked);
+              setStrainData((prev) => ({ ...(prev || {}), expressionInfo: checked }));
+            }}
           />
           <span>
             The manuscript contains expression data.
