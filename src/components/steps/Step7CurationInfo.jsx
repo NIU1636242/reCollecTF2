@@ -480,7 +480,6 @@ VALUES ('${esc(site)}', ${curationIdExpr},
         ${TF_function ? `'${esc(TF_function)}'` : "NULL"});
         `.trim());
 
-        // Optional: if you want techniques linked even for notannotated, you can add it here later.
         continue;
       }
 

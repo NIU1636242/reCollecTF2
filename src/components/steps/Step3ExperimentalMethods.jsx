@@ -3,6 +3,40 @@ import { useState, useEffect } from "react";
 import { runQuery } from "../../db/queryExecutor";
 import { useCuration } from "../../context/CurationContext";
 
+const QUICKGO_BASE = "https://www.ebi.ac.uk/QuickGO/services/ontology/eco/terms/";
+
+function normalizeEco(raw) {
+  let v = String(raw || "").trim().toUpperCase();
+  if (!v) return "";
+  if (!v.startsWith("ECO:")) v = "ECO:" + v;
+  return v;
+}
+
+async function fetchEcoFromQuickGO(ecoId, { proxy = "" } = {}) {
+  const id = normalizeEco(ecoId);
+  if (!id) return null;
+
+  const url = `${QUICKGO_BASE}${encodeURIComponent(id)}`;
+  const res = await fetch(proxy ? proxy + encodeURIComponent(url) : url, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) return null;
+  const json = await res.json();
+
+  const term = json?.results?.[0];
+  if (!term?.id) return null;
+
+  return {
+    id: term.id,
+    name: term.name || "",
+    definition:
+      term.definition?.text ||
+      term.definition ||
+      "",
+  };
+}
+
 export default function Step3ExperimentalMethods() {
   const { techniques, setTechniques, goToNextStep } = useCuration();
 
@@ -30,9 +64,13 @@ export default function Step3ExperimentalMethods() {
 
   const [presetFunction, setPresetFunction] = useState("");
 
-
   // Manual ECO code (new)
   const [newEcoCode, setNewEcoCode] = useState("");
+
+  const PROXY = "https://corsproxy.io/?";
+  const [quickGoTerm, setQuickGoTerm] = useState(null);
+  const [validatingQuickGo, setValidatingQuickGo] = useState(false);
+
 
   function esc(str) {
     return String(str || "").replace(/'/g, "''");
@@ -57,6 +95,46 @@ export default function Step3ExperimentalMethods() {
     }
     fetchCategories();
   }, []);
+
+  useEffect(() => {
+    if (!showCreateForm) return;
+
+    const id = normalizeEco(newEcoCode);
+    setQuickGoTerm(null);
+
+    // si está vacío, no validamos
+    if (!id) return;
+
+    let cancelled = false;
+    setValidatingQuickGo(true);
+    setError("");
+
+    const t = setTimeout(async () => {
+      try {
+        const term = await fetchEcoFromQuickGO(id, { proxy: PROXY });
+        if (cancelled) return;
+
+        if (!term) {
+          setQuickGoTerm(null);
+          setError(`ECO code not found in QuickGO: ${id}`);
+        } else {
+          setQuickGoTerm(term);
+          setError("");
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setQuickGoTerm(null);
+        setError("Error contacting QuickGO for ECO validation.");
+      } finally {
+        if (!cancelled) setValidatingQuickGo(false);
+      }
+    }, 400); // pequeño debounce para no spamear la API
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [newEcoCode, showCreateForm]);
 
   // Autocomplete (by name or ECO code)
   async function handleAutocomplete(val) {
@@ -129,56 +207,67 @@ export default function Step3ExperimentalMethods() {
 
   // Create a new technique manually
   async function handleCreateEco() {
-    if (!newEcoCode.trim()) {
+    setError("");
+
+    const raw = normalizeEco(newEcoCode);
+    if (!raw) {
       setError("Please enter an ECO code.");
       return;
     }
 
-    let raw = newEcoCode.trim().toUpperCase();
-    if (!raw.startsWith("ECO:")) raw = "ECO:" + raw;
+    // 1) Debe existir en QuickGO
+    // (si aún no está cargado, intenta buscarlo aquí también)
+    let term = quickGoTerm;
+    if (!term || term.id !== raw) {
+      setValidatingQuickGo(true);
+      term = await fetchEcoFromQuickGO(raw, { proxy: PROXY });
+      setValidatingQuickGo(false);
+    }
 
+    if (!term) {
+      setError(`This ECO code does not exist in QuickGO: ${raw}`);
+      return;
+    }
+
+    // 2) No duplicados en la curation actual
     const exists = techniques.some((t) => getEcoId(t) === raw);
     if (exists) {
       setError("This ECO code is already added to the curation.");
       return;
     }
 
+    // 3) Campos internos tuyos (siguen igual)
     if (!presetFunction) {
       setError("Please select a preset function.");
       return;
     }
-
     if (!selectedCategory) {
       setError("Please select a category.");
       return;
     }
 
+    // 4) Insert a DB (IMPORTANTE: name NO NULL)
     const presetValue = presetFunction ? `'${esc(presetFunction)}'` : "NULL";
 
-    const sql = `
-      INSERT INTO core_experimentaltechnique (name, description, preset_function, EO_term)
-      VALUES (NULL, '${esc(techDescription)}', ${presetValue}, '${esc(raw)}');
+    // Si el usuario no pone descripción, usa la definición de QuickGO como fallback
+    const finalDesc =
+      String(techDescription || "").trim() ||
+      String(term.definition || "").trim() ||
+      "—";
 
-      INSERT INTO core_experimentaltechnique_categories (experimentaltechnique_id, experimentaltechniquecategory_id)
-      VALUES (
-      (SELECT technique_id FROM core_experimentaltechnique WHERE EO_term='${esc(raw)}'),
-      ${Number(selectedCategory)}
-      );
-    `;
-
-    // Store technique as object (name fallback to ECO code)
+    // 5) Guardar en contexto (con nombre oficial QuickGO)
     setTechniques([
       ...techniques,
-      {
-        ecoId: raw,
-        name: techDescription?.trim() || "—",
-      },
+      { ecoId: raw, name: term.name || raw, description: finalDesc },
     ]);
-    
+
+    // limpiar UI
     setShowCreateForm(false);
     setNewEcoCode("");
     setTechDescription("");
     setSelectedCategory("");
+    setPresetFunction("");
+    setQuickGoTerm(null);
     setError("");
   }
 
@@ -256,6 +345,16 @@ export default function Step3ExperimentalMethods() {
             />
           </div>
 
+          {validatingQuickGo && (
+            <p className="text-xs text-muted">Validating ECO in QuickGO...</p>
+          )}
+
+          {quickGoTerm && (
+            <div className="text-xs text-emerald-300">
+              ✅ Found in QuickGO: <strong>{quickGoTerm.name}</strong> ({quickGoTerm.id})
+            </div>
+          )}
+
           {/* Preset function */}
           <div>
             <label className="block font-medium">Preset function</label>
@@ -300,7 +399,13 @@ export default function Step3ExperimentalMethods() {
             />
           </div>
 
-          <button className="btn" type="button" onClick={handleCreateEco}>
+          <button
+            className="btn"
+            type="button"
+            onClick={handleCreateEco}
+            disabled={validatingQuickGo || !quickGoTerm}
+            title={!quickGoTerm ? "Enter a valid ECO code that exists in QuickGO" : ""}
+          >
             Save new technique
           </button>
         </div>
