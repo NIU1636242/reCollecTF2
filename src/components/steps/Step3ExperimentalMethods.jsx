@@ -114,6 +114,13 @@ export default function Step3ExperimentalMethods() {
         const term = await fetchEcoFromQuickGO(id, { proxy: PROXY });
         if (cancelled) return;
 
+        if (!term) {
+          setQuickGoTerm(null);
+          setError(`ECO code not found in QuickGO: ${id}`);
+        } else {
+          setQuickGoTerm(term);
+          setError("");
+        }
       } catch (e) {
         if (cancelled) return;
         setQuickGoTerm(null);
@@ -344,7 +351,7 @@ export default function Step3ExperimentalMethods() {
 
           {quickGoTerm && (
             <div className="text-xs text-emerald-300">
-              Found in QuickGO: {quickGoTerm.name} ({quickGoTerm.id}) 
+              Found in QuickGO: {quickGoTerm.name} ({quickGoTerm.id})
             </div>
           )}
 
