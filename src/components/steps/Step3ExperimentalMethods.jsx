@@ -5,6 +5,16 @@ import { useCuration } from "../../context/CurationContext";
 
 const QUICKGO_BASE = "https://www.ebi.ac.uk/QuickGO/services/ontology/eco/terms/";
 
+// ✅ CORS fallback (no depender de 1 proxy)
+const QUICKGO_PROXIES = [
+  // suele ser estable
+  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  // alternativa estable
+  (u) => `https://cors.isomorphic-git.org/${u}`,
+  // a veces bloquea, pero lo dejamos al final
+  (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+];
+
 function normalizeEco(raw) {
   let v = String(raw || "").trim().toUpperCase();
   if (!v) return "";
@@ -12,17 +22,61 @@ function normalizeEco(raw) {
   return v;
 }
 
-async function fetchEcoFromQuickGO(ecoId, { proxy = "" } = {}) {
+// ✅ helper: fetch JSON con fallback de proxies
+async function fetchJsonWithProxyFallback(url, { timeoutMs = 12000 } = {}) {
+  let lastErr = null;
+
+  for (const makeProxyUrl of QUICKGO_PROXIES) {
+    const proxiedUrl = makeProxyUrl(url);
+
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(proxiedUrl, {
+        method: "GET",
+        signal: ctrl.signal,
+        headers: { Accept: "application/json,text/plain,*/*" },
+      });
+
+      clearTimeout(t);
+
+      if (!res.ok) {
+        lastErr = new Error(`Proxy HTTP ${res.status}`);
+        continue;
+      }
+
+      const text = await res.text();
+
+      // si el proxy devuelve HTML o vacío, lo ignoramos
+      if (!text || text.toLowerCase().includes("<html")) {
+        lastErr = new Error("Proxy returned HTML/empty response");
+        continue;
+      }
+
+      try {
+        return JSON.parse(text);
+      } catch {
+        lastErr = new Error("Proxy returned non-JSON response");
+        continue;
+      }
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+      continue;
+    }
+  }
+
+  throw lastErr || new Error("All proxies failed");
+}
+
+// ✅ QuickGO fetch usando fallback (sin PROXY fijo)
+async function fetchEcoFromQuickGO(ecoId) {
   const id = normalizeEco(ecoId);
   if (!id) return null;
 
   const url = `${QUICKGO_BASE}${encodeURIComponent(id)}`;
-  const res = await fetch(proxy ? proxy + encodeURIComponent(url) : url, {
-    headers: { Accept: "application/json" },
-  });
-
-  if (!res.ok) return null;
-  const json = await res.json();
+  const json = await fetchJsonWithProxyFallback(url);
 
   const term = json?.results?.[0];
   if (!term?.id) return null;
@@ -30,10 +84,7 @@ async function fetchEcoFromQuickGO(ecoId, { proxy = "" } = {}) {
   return {
     id: term.id,
     name: term.name || "",
-    definition:
-      term.definition?.text ||
-      term.definition ||
-      "",
+    definition: term.definition?.text || term.definition || "",
   };
 }
 
@@ -67,10 +118,8 @@ export default function Step3ExperimentalMethods() {
   // Manual ECO code (new)
   const [newEcoCode, setNewEcoCode] = useState("");
 
-  const PROXY = "https://corsproxy.io/?";
   const [quickGoTerm, setQuickGoTerm] = useState(null);
   const [validatingQuickGo, setValidatingQuickGo] = useState(false);
-
 
   function esc(str) {
     return String(str || "").replace(/'/g, "''");
@@ -105,13 +154,16 @@ export default function Step3ExperimentalMethods() {
     // si está vacío, no validamos
     if (!id) return;
 
+    // ✅ evita llamar demasiado pronto (reduce bloqueos)
+    if (!/^ECO:\d{4,}$/.test(id)) return;
+
     let cancelled = false;
     setValidatingQuickGo(true);
     setError("");
 
     const t = setTimeout(async () => {
       try {
-        const term = await fetchEcoFromQuickGO(id, { proxy: PROXY });
+        const term = await fetchEcoFromQuickGO(id);
         if (cancelled) return;
 
         if (!term) {
@@ -220,7 +272,7 @@ export default function Step3ExperimentalMethods() {
     let term = quickGoTerm;
     if (!term || term.id !== raw) {
       setValidatingQuickGo(true);
-      term = await fetchEcoFromQuickGO(raw, { proxy: PROXY });
+      term = await fetchEcoFromQuickGO(raw);
       setValidatingQuickGo(false);
     }
 
