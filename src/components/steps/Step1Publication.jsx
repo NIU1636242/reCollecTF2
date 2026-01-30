@@ -1,18 +1,81 @@
+// src/components/steps/Step1Publication.jsx
 import { useState, useEffect } from "react";
 import { useCuration } from "../../context/CurationContext";
 
+// --------------------
+// CORS-safe fetch helper (proxy fallback)
+// --------------------
+const PROXIES = [
+  // AllOrigins (raw) is usually stable
+  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  // Isomorphic CORS proxy
+  (u) => `https://cors.isomorphic-git.org/${u}`,
+  // corsproxy.io
+  (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+];
+
+async function fetchJsonWithProxyFallback(url, { timeoutMs = 12000 } = {}) {
+  let lastErr = null;
+
+  for (const makeProxyUrl of PROXIES) {
+    const proxiedUrl = makeProxyUrl(url);
+
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(proxiedUrl, {
+        method: "GET",
+        signal: ctrl.signal,
+        headers: { Accept: "application/json,text/plain,*/*" },
+      });
+
+      clearTimeout(t);
+
+      // If proxy blocks (403/429/etc), try next proxy
+      if (!res.ok) {
+        lastErr = new Error(`Proxy HTTP ${res.status}`);
+        continue;
+      }
+
+      // Some proxies return HTML error pages. Detect and skip.
+      const text = await res.text();
+      if (!text || text.toLowerCase().includes("<html")) {
+        lastErr = new Error("Proxy returned HTML/empty response");
+        continue;
+      }
+
+      // Try parse JSON
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        lastErr = new Error("Proxy returned non-JSON response");
+        continue;
+      }
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+      continue;
+    }
+  }
+
+  throw lastErr || new Error("All proxies failed");
+}
+
+// --------------------
+// Component
+// --------------------
 export default function Step1Publication() {
   const { publication, setPublication, goToNextStep } = useCuration();
 
-  const [query, setQuery] = useState(""); //input
-  const [loading, setLoading] = useState(false); //si està buscant
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
   const [article, setArticle] = useState(null);
   const [error, setError] = useState("");
 
-  const PROXY = "https://corsproxy.io/?";
   const BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
-  useEffect(() => { //mostra dades al anar enrere
+  useEffect(() => {
     if (publication) {
       setArticle({
         ...publication,
@@ -23,15 +86,12 @@ export default function Step1Publication() {
     }
   }, [publication]);
 
-
-  //Main search function (PMID, DOI o TITLE)
   async function handleSearch(e) {
     e.preventDefault();
     setError("");
     setArticle(null);
 
     if (!query.trim()) return;
-
     setLoading(true);
 
     try {
@@ -43,10 +103,9 @@ export default function Step1Publication() {
       // SEARCH BY PMID
       if (isPMID) {
         const url = `${BASE}/esummary.fcgi?db=pubmed&id=${q}&retmode=json`;
-        const res = await fetch(PROXY + encodeURIComponent(url));
-        const json = await res.json();
-        const rec = json.result?.[q];
+        const json = await fetchJsonWithProxyFallback(url);
 
+        const rec = json?.result?.[q];
         if (!rec) throw new Error("PMID not found.");
 
         data = {
@@ -66,15 +125,13 @@ export default function Step1Publication() {
           q
         )}[doi]`;
 
-        const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
-        const js1 = await r1.json();
-        const pmid = js1.esearchresult?.idlist?.[0];
+        const js1 = await fetchJsonWithProxyFallback(esearchUrl);
+        const pmid = js1?.esearchresult?.idlist?.[0];
 
         if (pmid) {
           const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
-          const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
-          const js2 = await r2.json();
-          const rec = js2.result?.[pmid];
+          const js2 = await fetchJsonWithProxyFallback(esumUrl);
+          const rec = js2?.result?.[pmid];
 
           if (rec) {
             data = {
@@ -84,19 +141,15 @@ export default function Step1Publication() {
               journal: rec.fulljournalname || "Unknown",
               pubdate: rec.pubdate || "No date",
               doi: normalizeDOI(rec.elocationid || q),
-
             };
           }
         }
 
-        // Fallback: CrossRef
+        // Fallback: CrossRef (also via proxy fallback)
         if (!data) {
-          const crUrl = `https://api.crossref.org/works/${encodeURIComponent(
-            q
-          )}`;
-          const crRes = await fetch(PROXY + encodeURIComponent(crUrl));
-          const crJson = await crRes.json();
-          const m = crJson.message;
+          const crUrl = `https://api.crossref.org/works/${encodeURIComponent(q)}`;
+          const crJson = await fetchJsonWithProxyFallback(crUrl);
+          const m = crJson?.message;
 
           if (!m) throw new Error("DOI not found in CrossRef.");
 
@@ -104,12 +157,11 @@ export default function Step1Publication() {
             pmid: null,
             title: m.title?.[0] || "Title not available",
             authors: (m.author || [])
-              .map((a) => `${a.family || ""} ${a.given || ""}`)
+              .map((a) => `${a.family || ""} ${a.given || ""}`.trim())
+              .filter(Boolean)
               .join(", "),
-            journal:
-              m["container-title"]?.[0] || "Unknown journal",
-            pubdate:
-              m.issued?.["date-parts"]?.[0]?.join("-") || "No date",
+            journal: m["container-title"]?.[0] || "Unknown journal",
+            pubdate: m.issued?.["date-parts"]?.[0]?.join("-") || "No date",
             doi: q,
           };
         }
@@ -121,36 +173,44 @@ export default function Step1Publication() {
           q
         )}[title]`;
 
-        const r1 = await fetch(PROXY + encodeURIComponent(esearchUrl));
-        const js1 = await r1.json();
-        const pmid = js1.esearchresult?.idlist?.[0];
+        const js1 = await fetchJsonWithProxyFallback(esearchUrl);
+        const pmid = js1?.esearchresult?.idlist?.[0];
 
         if (!pmid) {
           throw new Error("No PubMed articles found with this title.");
         }
 
         const esumUrl = `${BASE}/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`;
-        const r2 = await fetch(PROXY + encodeURIComponent(esumUrl));
-        const js2 = await r2.json();
-        const rec = js2.result?.[pmid];
+        const js2 = await fetchJsonWithProxyFallback(esumUrl);
+        const rec = js2?.result?.[pmid];
 
         data = {
           pmid,
-          title: rec.title || "Title not available",
-          authors: (rec.authors || []).map((a) => a.name).join(", "),
-          journal: rec.fulljournalname || "Unknown",
-          pubdate: rec.pubdate || "No date",
-          doi: normalizeDOI(rec.elocationid),
+          title: rec?.title || "Title not available",
+          authors: (rec?.authors || []).map((a) => a.name).join(", "),
+          journal: rec?.fulljournalname || "Unknown",
+          pubdate: rec?.pubdate || "No date",
+          doi: normalizeDOI(rec?.elocationid),
         };
       }
 
       if (!data) throw new Error("No results found.");
-
       setArticle(data);
     } catch (e) {
       console.error(e);
+
+      const msg = String(e?.message || e);
+      const looksLikeProxy =
+        msg.includes("Proxy HTTP") ||
+        msg.includes("All proxies failed") ||
+        msg.includes("AbortError") ||
+        msg.includes("HTML/empty") ||
+        msg.includes("non-JSON");
+
       setError(
-        "Error searching the article. Please enter a PMID, DOI or article title."
+        looksLikeProxy
+          ? "CORS/Proxy blocked temporarily. Try again in a moment."
+          : "Error searching the article. Please enter a PMID, DOI or article title."
       );
     } finally {
       setLoading(false);
@@ -159,7 +219,7 @@ export default function Step1Publication() {
 
   function normalizeDOI(raw) {
     if (!raw) return "No DOI";
-    const m = raw.match(/10\.\d{4,9}\/\S+/i);
+    const m = String(raw).match(/10\.\d{4,9}\/\S+/i);
     return m ? m[0] : raw;
   }
 
