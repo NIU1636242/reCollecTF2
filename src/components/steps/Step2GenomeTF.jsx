@@ -419,14 +419,22 @@ export default function Step2GenomeTF() {
         j.proteinDescription?.submissionNames?.[0]?.fullName?.value ||
         "";
 
+      // 👇 intentamos extraer RefSeq cross refs
+      const refseqIds = (j.uniProtKBCrossReferences || [])
+        .filter((x) => x?.database === "RefSeq")
+        .map((x) => x?.id)
+        .filter(Boolean);
+
       return {
         title: name || j.id || acc,
         organism: j.organism?.scientificName || "",
+        refseqIds, // array (puede estar vacío)
       };
     } catch {
       return null;
     }
   }
+
 
   // RefSeq protein summary (NO PROXY)
   async function fetchProteinSummary(acc) {
@@ -559,6 +567,14 @@ export default function Step2GenomeTF() {
     if (!info) return;
 
     addUniProtItem(acc, info.title);
+
+    // si UniProt trae RefSeq, añadimos automáticamente
+    if (info.refseqIds?.length) {
+      const pick = info.refseqIds[0]; // versión simple
+      if (!refseqItems.some((x) => x.accession === pick)) {
+        addRefseqItem(pick, "");
+      }
+    }
     setUniprotInput("");
     setUniprotSuggestions([]);
   }
